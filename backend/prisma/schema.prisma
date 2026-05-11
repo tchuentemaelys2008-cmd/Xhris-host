@@ -1,0 +1,813 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ USER ============
+model User {
+  id                String    @id @default(uuid())
+  name              String
+  email             String    @unique
+  password          String?
+  googleId          String?   @unique
+  role              Role      @default(USER)
+  status            UserStatus @default(ACTIVE)
+  plan              Plan      @default(FREE)
+  planExpiry        DateTime?
+  coins             Int       @default(10)
+  xp                Int       @default(0)
+  level             Int       @default(1)
+  avatar            String?
+  banner            String?
+  bio               String?
+  whatsapp          String?
+  location          String?
+  language          String    @default("fr")
+  timezone          String    @default("UTC")
+  currency          String    @default("EUR")
+  theme             String    @default("dark")
+  emailVerified     Boolean   @default(false)
+  emailVerifyToken  String?
+  twoFactorEnabled  Boolean   @default(false)
+  twoFactorSecret   String?
+  referralCode      String    @unique @default(cuid())
+  referredBy        String?
+  lastLogin         DateTime?
+  lastLoginIp       String?
+  bannedAt          DateTime?
+  bannedReason      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  bots              Bot[]
+  servers           Server[]
+  transactions      Transaction[]
+  sentTransfers     CoinTransfer[]  @relation("SentTransfers")
+  receivedTransfers CoinTransfer[]  @relation("ReceivedTransfers")
+  subscription      Subscription?
+  apiKeys           ApiKey[]
+  webhooks          Webhook[]
+  messages          Message[]
+  notifications     Notification[]
+  supportTickets    SupportTicket[]
+  sessions          Session[]
+  developerProfile  DeveloperProfile?
+  referrals         Referral[]      @relation("ReferrerReferrals")
+  referredByUser    Referral?       @relation("ReferredReferrals")
+  bonusCodeUsages   BonusCodeUsage[]
+  reviews           BotReview[]
+  withdrawals       Withdrawal[]
+  loginHistory      LoginHistory[]
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  PREMIUM
+  DEVELOPER
+  MODERATOR
+  ADMIN
+  SUPERADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+  PENDING
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ADVANCED
+  ELITE
+}
+
+// ============ SESSION ============
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  device    String?
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("sessions")
+}
+
+model LoginHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  ip        String?
+  device    String?
+  location  String?
+  success   Boolean
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("login_history")
+}
+
+// ============ BOT ============
+model Bot {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  version     String    @default("1.0.0")
+  platform    Platform  @default(WHATSAPP)
+  status      BotStatus @default(STOPPED)
+  userId      String
+  serverId    String?
+  sessionLink String?
+  envVars     Json      @default("{}")
+  cpuUsage    Float     @default(0)
+  ramUsage    Float     @default(0)
+  uptime      Int       @default(0)  // seconds
+  restarts    Int       @default(0)
+  coinsPerDay Int       @default(10)
+  processId   String?
+  logs        String[]  @default([])
+  autoRestart Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server? @relation(fields: [serverId], references: [id])
+
+  @@map("bots")
+}
+
+enum BotStatus {
+  RUNNING
+  STOPPED
+  STARTING
+  STOPPING
+  ERROR
+  PAUSED
+}
+
+enum Platform {
+  WHATSAPP
+  DISCORD
+  TELEGRAM
+  INSTAGRAM
+  TIKTOK
+  OTHER
+}
+
+// ============ MARKETPLACE BOT ============
+model MarketplaceBot {
+  id              String              @id @default(uuid())
+  name            String
+  description     String
+  longDescription String?
+  version         String              @default("1.0.0")
+  platform        Platform            @default(WHATSAPP)
+  tags            String[]            @default([])
+  icon            String?
+  screenshots     String[]            @default([])
+  downloads       Int                 @default(0)
+  rating          Float               @default(0)
+  reviewCount     Int                 @default(0)
+  developerId     String
+  status          MarketplaceBotStatus @default(PENDING)
+  coinsPerDay     Int                 @default(10)
+  setupFile       String?
+  envTemplate     Json                @default("{}")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  developer DeveloperProfile @relation(fields: [developerId], references: [id], onDelete: Cascade)
+  reviews   BotReview[]
+
+  @@map("marketplace_bots")
+}
+
+enum MarketplaceBotStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+  DRAFT
+}
+
+model BotReview {
+  id        String   @id @default(uuid())
+  botId     String
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  bot  MarketplaceBot @relation(fields: [botId], references: [id], onDelete: Cascade)
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, userId])
+  @@map("bot_reviews")
+}
+
+// ============ DEVELOPER ============
+model DeveloperProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  displayName String?
+  bio         String?
+  website     String?
+  github      String?
+  twitter     String?
+  discord     String?
+  whatsapp    String?
+  verified    Boolean  @default(false)
+  public      Boolean  @default(true)
+  totalDownloads Int   @default(0)
+  totalUsers     Int   @default(0)
+  earnings       Float @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bots MarketplaceBot[]
+
+  @@map("developer_profiles")
+}
+
+// ============ SERVER ============
+model Server {
+  id           String       @id @default(uuid())
+  name         String
+  userId       String
+  plan         ServerPlan   @default(STARTER)
+  status       ServerStatus @default(OFFLINE)
+  domain       String?      @unique
+  ipAddress    String?
+  cpuUsage     Float        @default(0)
+  ramUsage     Float        @default(0)
+  storageUsed  Float        @default(0)
+  storageTotal Float        @default(10)  // GB
+  uptime       Int          @default(0)   // seconds
+  coinsPerDay  Int          @default(10)
+  location     String       @default("Paris, FR")
+  dockerId     String?
+  processIds   String[]     @default([])
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bots Bot[]
+
+  @@map("servers")
+}
+
+enum ServerPlan {
+  STARTER
+  PRO
+  ADVANCED
+  ELITE
+}
+
+enum ServerStatus {
+  ONLINE
+  OFFLINE
+  STARTING
+  STOPPING
+  MAINTENANCE
+  ERROR
+}
+
+// ============ TRANSACTION ============
+model Transaction {
+  id          String          @id @default(uuid())
+  userId      String
+  type        TransactionType
+  description String
+  amount      Int             // in coins
+  status      TxStatus        @default(COMPLETED)
+  reference   String?
+  metadata    Json            @default("{}")
+  createdAt   DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+enum TransactionType {
+  DAILY_BONUS
+  DEPLOY_BOT
+  CREATE_SERVER
+  PURCHASE
+  TRANSFER_SENT
+  TRANSFER_RECEIVED
+  REFERRAL
+  BONUS_CODE
+  SUBSCRIPTION
+  REFUND
+  ADMIN_GRANT
+  ADMIN_DEDUCT
+}
+
+enum TxStatus {
+  COMPLETED
+  PENDING
+  FAILED
+  CANCELLED
+}
+
+// ============ COIN TRANSFER ============
+model CoinTransfer {
+  id          String   @id @default(uuid())
+  senderId    String
+  receiverId  String
+  amount      Int
+  fee         Int      @default(1)
+  status      TxStatus @default(COMPLETED)
+  note        String?
+  createdAt   DateTime @default(now())
+
+  sender   User @relation("SentTransfers", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedTransfers", fields: [receiverId], references: [id])
+
+  @@map("coin_transfers")
+}
+
+// ============ PAYMENT ============
+model Payment {
+  id          String        @id @default(uuid())
+  userId      String
+  amount      Float
+  currency    String        @default("EUR")
+  method      PaymentMethod
+  provider    String?
+  reference   String?       @unique
+  status      PaymentStatus @default(PENDING)
+  coins       Int           @default(0)
+  packId      String?
+  metadata    Json          @default("{}")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("payments")
+}
+
+enum PaymentMethod {
+  CARD
+  PAYPAL
+  CRYPTO
+  BANK_TRANSFER
+  FAPSHI
+  GENIUSPAY
+  MINIPAY
+  MANUAL
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+// ============ WITHDRAWAL ============
+model Withdrawal {
+  id        String           @id @default(uuid())
+  userId    String
+  amount    Float
+  fee       Float            @default(0)
+  net       Float
+  method    PaymentMethod
+  details   Json             @default("{}")
+  status    WithdrawalStatus @default(PENDING)
+  processedAt DateTime?
+  processedBy String?
+  note      String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("withdrawals")
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============ SUBSCRIPTION ============
+model Subscription {
+  id          String           @id @default(uuid())
+  userId      String           @unique
+  plan        String
+  amount      Float
+  cycle       SubscriptionCycle
+  status      SubStatus        @default(ACTIVE)
+  nextPayment DateTime
+  cancelledAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionCycle {
+  WEEKLY
+  MONTHLY
+  ANNUAL
+}
+
+enum SubStatus {
+  ACTIVE
+  PENDING
+  CANCELLED
+  EXPIRED
+}
+
+// ============ CREDIT PACK ============
+model CreditPack {
+  id       String  @id @default(uuid())
+  name     String
+  coins    Int
+  price    Float
+  currency String  @default("EUR")
+  bonus    Int     @default(0)
+  popular  Boolean @default(false)
+  bestValue Boolean @default(false)
+  active   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("credit_packs")
+}
+
+// ============ BONUS CODE ============
+model BonusCode {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  coins      Int
+  type       CodeType @default(FIXED)
+  usageLimit Int?
+  usageCount Int      @default(0)
+  expiresAt  DateTime?
+  active     Boolean  @default(true)
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  usages BonusCodeUsage[]
+
+  @@map("bonus_codes")
+}
+
+enum CodeType {
+  FIXED
+  PERCENTAGE
+}
+
+model BonusCodeUsage {
+  id        String   @id @default(uuid())
+  codeId    String
+  userId    String
+  usedAt    DateTime @default(now())
+
+  code BonusCode @relation(fields: [codeId], references: [id])
+  user User      @relation(fields: [userId], references: [id])
+
+  @@unique([codeId, userId])
+  @@map("bonus_code_usages")
+}
+
+// ============ PROMO CODE ============
+model PromoCode {
+  id         String      @id @default(uuid())
+  code       String      @unique
+  type       PromoType   @default(PERCENTAGE)
+  discount   Float
+  usageCount Int         @default(0)
+  usageLimit Int?
+  expiresAt  DateTime?
+  status     PromoStatus @default(ACTIVE)
+  createdBy  String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@map("promo_codes")
+}
+
+enum PromoType {
+  PERCENTAGE
+  FIXED
+  FREE
+}
+
+enum PromoStatus {
+  ACTIVE
+  PENDING
+  EXPIRED
+  DISABLED
+}
+
+// ============ REFERRAL ============
+model Referral {
+  id          String   @id @default(uuid())
+  referrerId  String
+  referredId  String   @unique
+  coinsEarned Int      @default(10)
+  createdAt   DateTime @default(now())
+
+  referrer User @relation("ReferrerReferrals", fields: [referrerId], references: [id])
+  referred User @relation("ReferredReferrals", fields: [referredId], references: [id])
+
+  @@map("referrals")
+}
+
+// ============ COMMUNITY ============
+model Channel {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  description String?
+  type        ChannelType @default(TEXT)
+  position    Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  messages Message[]
+
+  @@map("channels")
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+  ANNOUNCEMENT
+}
+
+model Message {
+  id          String    @id @default(uuid())
+  channelId   String
+  userId      String
+  content     String
+  attachments String[]  @default([])
+  edited      Boolean   @default(false)
+  editedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  channel   Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reactions MessageReaction[]
+
+  @@map("messages")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+// ============ API KEY ============
+model ApiKey {
+  id           String      @id @default(uuid())
+  userId       String
+  name         String
+  key          String      @unique
+  permissions  String[]    @default(["read"])
+  status       KeyStatus   @default(ACTIVE)
+  lastUsed     DateTime?
+  requestCount Int         @default(0)
+  createdAt    DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+enum KeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+// ============ WEBHOOK ============
+model Webhook {
+  id           String   @id @default(uuid())
+  userId       String
+  name         String
+  url          String
+  events       String[] @default([])
+  secret       String
+  status       WebhookStatus @default(ACTIVE)
+  lastActivity DateTime?
+  lastStatus   String?
+  deliveries   Int      @default(0)
+  failures     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveryLogs WebhookDelivery[]
+
+  @@map("webhooks")
+}
+
+enum WebhookStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model WebhookDelivery {
+  id         String   @id @default(uuid())
+  webhookId  String
+  event      String
+  payload    Json
+  status     Int
+  response   String?
+  duration   Int?     // ms
+  createdAt  DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@map("webhook_deliveries")
+}
+
+// ============ NOTIFICATION ============
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(INFO)
+  read      Boolean          @default(false)
+  link      String?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  PAYMENT
+  BOT
+  SERVER
+  COMMUNITY
+}
+
+// ============ SUPPORT ============
+model SupportTicket {
+  id        String       @id @default(uuid())
+  userId    String
+  subject   String
+  status    TicketStatus @default(OPEN)
+  priority  TicketPriority @default(MEDIUM)
+  category  String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user     User           @relation(fields: [userId], references: [id])
+  messages TicketMessage[]
+
+  @@map("support_tickets")
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model TicketMessage {
+  id        String   @id @default(uuid())
+  ticketId  String
+  senderId  String
+  content   String
+  isAdmin   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_messages")
+}
+
+model SupportArticle {
+  id         String   @id @default(uuid())
+  title      String
+  content    String
+  category   String
+  tags       String[] @default([])
+  views      Int      @default(0)
+  published  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("support_articles")
+}
+
+model Faq {
+  id        String   @id @default(uuid())
+  question  String
+  answer    String
+  category  String?
+  position  Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("faqs")
+}
+
+// ============ ANNOUNCEMENT ============
+model Announcement {
+  id          String              @id @default(uuid())
+  title       String
+  description String
+  imageUrl    String?
+  linkUrl     String?
+  placement   String
+  status      AnnouncementStatus  @default(ACTIVE)
+  priority    AnnouncementPriority @default(MEDIUM)
+  impressions Int                 @default(0)
+  clicks      Int                 @default(0)
+  startDate   DateTime
+  endDate     DateTime
+  createdBy   String
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@map("announcements")
+}
+
+enum AnnouncementStatus {
+  ACTIVE
+  INACTIVE
+  SCHEDULED
+}
+
+enum AnnouncementPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// ============ SYSTEM ============
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String
+  message   String
+  meta      Json     @default("{}")
+  userId    String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@map("system_logs")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model DailyBonus {
+  id        String   @id @default(uuid())
+  userId    String
+  coins     Int
+  claimedAt DateTime @default(now())
+
+  @@unique([userId, claimedAt])
+  @@map("daily_bonuses")
+}

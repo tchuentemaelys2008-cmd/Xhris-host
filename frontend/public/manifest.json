@@ -1,0 +1,16 @@
+{
+  "name": "XHRIS Host",
+  "short_name": "XHRIS",
+  "description": "Deploy WhatsApp bots and manage cloud servers with ease.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0F",
+  "theme_color": "#7c3aed",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

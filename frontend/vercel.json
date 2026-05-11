@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "env": {
+    "BACKEND_URL": "https://xhris-host-production.up.railway.app"
+  },
+  "build": {
+    "env": {
+      "BACKEND_URL": "https://xhris-host-production.up.railway.app"
+    }
+  }
+}

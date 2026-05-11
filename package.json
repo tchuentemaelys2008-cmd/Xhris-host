@@ -1,0 +1,21 @@
+{
+  "name": "xhris-host",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["frontend", "backend"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=backend\"",
+    "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "start": "concurrently \"npm run start --workspace=frontend\" \"npm run start --workspace=backend\"",
+    "db:generate": "npm run db:generate --workspace=backend",
+    "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:seed": "npm run db:seed --workspace=backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "overrides": {
+    "uuid": "^11.0.0",
+    "sourcemap-codec": "npm:@jridgewell/sourcemap-codec@1.5.5"
+  }
+}

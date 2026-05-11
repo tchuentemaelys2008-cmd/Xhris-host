@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "features": "Features",
+    "pricing": "Pricing",
+    "marketplace": "Marketplace",
+    "docs": "Docs",
+    "login": "Sign In",
+    "register": "Get Started"
+  },
+  "hero": {
+    "badge": "Next-generation SaaS platform",
+    "title1": "Host your",
+    "title2": "WhatsApp Bots",
+    "title3": "& Cloud Servers",
+    "subtitle": "Deploy, manage and monetize your WhatsApp bots in a few clicks. All-in-one panel with live terminal, monitoring and marketplace.",
+    "cta": "Start for free",
+    "demo": "Watch demo"
+  },
+  "stats": {
+    "users": "Active users",
+    "bots": "Deployed bots",
+    "servers": "Active servers",
+    "uptime": "Guaranteed uptime"
+  },
+  "features": {
+    "title": "Everything you need",
+    "subtitle": "A complete platform to host, manage and scale your projects."
+  },
+  "pricing": {
+    "title": "Simple and transparent pricing",
+    "subtitle": "Start for free. Scale as you grow."
+  },
+  "testimonials": {
+    "title": "What our users say"
+  },
+  "cta": {
+    "title": "Ready to get started?",
+    "subtitle": "Join over 12,000 developers who trust XHRIS Host. Start for free with 10 coins.",
+    "button": "Create my account for free"
+  },
+  "footer": {
+    "rights": "All rights reserved.",
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "contact": "Contact"
+  }
+}
