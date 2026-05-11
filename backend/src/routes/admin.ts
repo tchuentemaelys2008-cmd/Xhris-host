@@ -327,7 +327,7 @@ router.post('/bonus-codes', async (req: AuthRequest, res: Response) => {
     const existing = await prisma.bonusCode.findUnique({ where: { code: code.toUpperCase() } });
     if (existing) return sendError(res, 'Code déjà existant', 409);
     const bc = await prisma.bonusCode.create({
-      data: { code: code.toUpperCase(), coins: Number(coins), usageLimit: usageLimit ? Number(usageLimit) : null, expiresAt: expiresAt ? new Date(expiresAt) : null },
+      data: { code: code.toUpperCase(), coins: Number(coins), usageLimit: usageLimit ? Number(usageLimit) : null, expiresAt: expiresAt ? new Date(expiresAt) : null, createdBy: req.user!.id },
     });
     sendSuccess(res, bc, 'Code bonus créé', 201);
   } catch (err) { sendError(res, 'Erreur', 500); }
