@@ -604,6 +604,20 @@ router.get('/messages', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
+router.get('/messages/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const ticket = await prisma.supportTicket.findUnique({
+      where: { id: req.params.id },
+      include: {
+        user: { select: { name: true, email: true, id: true } },
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!ticket) return sendError(res, 'Ticket non trouvé', 404);
+    sendSuccess(res, ticket);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
 router.post('/messages/:id/reply', async (req: AuthRequest, res: Response) => {
   try {
     const { content } = req.body;

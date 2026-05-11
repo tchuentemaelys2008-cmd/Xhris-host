@@ -11,19 +11,6 @@ import { adminApi } from '@/lib/api';
 import { formatRelative, getStatusDot, getStatusLabel, cn } from '@/lib/utils';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis } from 'recharts';
 
-const ALERTS = [
-  { level: 'error', label: 'Utilisation CPU élevée', server: 'XHRIS DB', time: 'il y a 5 min' },
-  { level: 'warn', label: 'Espace disque faible', server: 'XHRIS CACHE', time: 'il y a 15 min' },
-  { level: 'info', label: 'Redémarrage planifié', server: 'XHRIS STAGING', time: 'il y a 1 heure' },
-];
-
-const MOCK_CHART = Array.from({ length: 10 }, (_, i) => ({
-  t: `-${(9 - i) * 6}min`,
-  cpu: Math.round(30 + Math.random() * 30),
-  ram: Math.round(45 + Math.random() * 25),
-  storage: Math.round(60 + Math.random() * 10),
-  net: Math.round(20 + Math.random() * 25),
-}));
 
 export default function AdminServersPage() {
   const qc = useQueryClient();
@@ -36,10 +23,16 @@ export default function AdminServersPage() {
     queryFn: () => adminApi.getServers({ search: search || undefined, status: statusFilter || undefined, page, limit: 10 }),
   });
 
-  const _raw_servers = (data as any)?.data?.servers ?? [];
-  const servers: any[] = Array.isArray(_raw_servers) ? _raw_servers : [];
-  const total: number = (data as any)?.data?.total || 0;
-  const totalPages = Math.ceil(total / 10);
+  const _raw_servers = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    return [];
+  })();
+  const servers: any[] = _raw_servers;
+  const total: number = (data as any)?.data?.pagination?.total || (data as any)?.data?.total || servers.length;
+  const totalPages = Math.max(1, Math.ceil(total / 10));
 
   const restartMutation = useMutation({
     mutationFn: (id: string) => adminApi.restartServer(id),

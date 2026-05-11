@@ -42,10 +42,16 @@ export default function AdminUsersPage() {
 
   const { data: statsData } = useQuery({ queryKey: ['admin-stats'], queryFn: () => adminApi.getDashboardStats() });
 
-  const _raw_users = (data as any)?.data?.users ?? [];
-  const users: any[] = Array.isArray(_raw_users) ? _raw_users : [];
-  const total: number = (data as any)?.data?.total || 0;
-  const totalPages = Math.ceil(total / 20);
+  const _raw_users = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    return [];
+  })();
+  const users: any[] = _raw_users;
+  const total: number = (data as any)?.data?.pagination?.total || (data as any)?.data?.total || users.length;
+  const totalPages = Math.max(1, Math.ceil(total / 20));
   const stats = (statsData as any)?.data || {};
 
   const banMutation = useMutation({

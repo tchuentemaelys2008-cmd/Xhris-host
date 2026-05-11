@@ -35,17 +35,16 @@ export default function AdminSubscriptionsPage() {
     queryFn: () => adminApi.getSubscriptions({ page, limit: 10, status: statusFilter || undefined }),
   });
 
-  const _raw_subs = (data as any)?.data?.subscriptions ?? [];
-  const subs: any[] = Array.isArray(_raw_subs) ? _raw_subs : [];
-  const total: number = (data as any)?.data?.total || 0;
-  const totalPages = Math.ceil(total / 10);
-
-  const pieData = [
-    { name: 'Premium', value: 45.2, color: '#a855f7' },
-    { name: 'Pro', value: 28.7, color: '#3b82f6' },
-    { name: 'Basic', value: 15.3, color: '#22c55e' },
-    { name: 'Autres', value: 10.8, color: '#f59e0b' },
-  ];
+  const _raw_subs = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    return [];
+  })();
+  const subs: any[] = _raw_subs;
+  const total: number = (data as any)?.data?.pagination?.total || (data as any)?.data?.total || subs.length;
+  const totalPages = Math.max(1, Math.ceil(total / 10));
 
   const STATUS_COLORS: Record<string, string> = {
     ACTIVE: 'text-green-400 bg-green-500/10',

@@ -25,10 +25,16 @@ export default function AdminBotsPage() {
 
   const { data: statsData } = useQuery({ queryKey: ['admin-stats'], queryFn: () => adminApi.getDashboardStats() });
 
-  const _raw_bots = (data as any)?.data?.bots ?? [];
-  const bots: any[] = Array.isArray(_raw_bots) ? _raw_bots : [];
-  const total: number = (data as any)?.data?.total || 0;
-  const totalPages = Math.ceil(total / 10);
+  const _raw_bots = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    return [];
+  })();
+  const bots: any[] = _raw_bots;
+  const total: number = (data as any)?.data?.pagination?.total || (data as any)?.data?.total || bots.length;
+  const totalPages = Math.max(1, Math.ceil(total / 10));
   const stats = (statsData as any)?.data || {};
 
   const reviewMutation = useMutation({
