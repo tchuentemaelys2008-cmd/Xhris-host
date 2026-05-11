@@ -26,8 +26,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const { data: session } = useSession();
   const user = session?.user as any;
 
-  const [language, setLanguage] = useState('fr');
-  const [currency, setCurrency] = useState('EUR');
+  const [language, setLanguage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('xhris_language') || 'fr';
+    }
+    return 'fr';
+  });
+  const [currency, setCurrency] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('xhris_currency') || 'EUR';
+    }
+    return 'EUR';
+  });
   const [theme, setTheme] = useState('dark');
   const [timezone, setTimezone] = useState('UTC');
 
@@ -36,8 +46,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     userApi.getProfile().then((res: any) => {
       const p = res?.data;
       if (!p) return;
-      if (p.language) setLanguage(p.language);
-      if (p.currency) setCurrency(p.currency);
+      // Only set from profile if not already set in localStorage
+      const storedLang = typeof window !== 'undefined' ? localStorage.getItem('xhris_language') : null;
+      const storedCurrency = typeof window !== 'undefined' ? localStorage.getItem('xhris_currency') : null;
+      if (p.language && !storedLang) setLanguage(p.language);
+      if (p.currency && !storedCurrency) setCurrency(p.currency);
       if (p.theme) setTheme(p.theme);
       if (p.timezone) setTimezone(p.timezone);
     }).catch(() => {});

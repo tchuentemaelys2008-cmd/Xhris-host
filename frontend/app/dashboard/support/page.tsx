@@ -7,11 +7,11 @@ import { motion } from 'framer-motion';
 import {
   HelpCircle, Ticket, Megaphone, Search, BookOpen, ChevronRight,
   Rocket, Bot, Coins, Server, Shield, Cpu, Receipt, Code,
-  Eye, Plus, Send, Loader2, CheckCircle, Clock, AlertCircle
+  Eye, Plus, Send, Loader2, CheckCircle, Clock, AlertCircle, MessageSquare, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
-import { supportApi } from '@/lib/api';
+import { supportApi, apiClient } from '@/lib/api';
 import { formatRelative, formatDateTime, cn } from '@/lib/utils';
 
 const TABS = [
@@ -41,16 +41,31 @@ export default function SupportPage() {
   const [tab, setTab] = useState('help');
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showReply, setShowReply] = useState(false);
+  const [replyTicket, setReplyTicket] = useState<any>(null);
+  const [replyContent, setReplyContent] = useState('');
   const [newTicket, setNewTicket] = useState({ subject: '', message: '', category: 'general', priority: 'MEDIUM' });
 
   const { data: articlesData } = useQuery({ queryKey: ['support-articles', search], queryFn: () => supportApi.getArticles({ search: search || undefined }) });
-  const { data: ticketsData, isLoading: ticketsLoading } = useQuery({ queryKey: ['tickets'], queryFn: () => supportApi.getTickets(), enabled: tab === 'tickets' });
+  const { data: ticketsData, isLoading: ticketsLoading } = useQuery({
+    queryKey: ['tickets'],
+    queryFn: () => supportApi.getTickets(),
+  });
   const { data: faqData } = useQuery({ queryKey: ['faq'], queryFn: () => supportApi.getFaq() });
 
   const _rawArticles = (articlesData as any)?.data?.articles ?? (articlesData as any)?.data;
   const articles: any[] = Array.isArray(_rawArticles) ? _rawArticles : [];
-  const _rawTickets = (ticketsData as any)?.data?.tickets ?? (ticketsData as any)?.data;
-  const tickets: any[] = Array.isArray(_rawTickets) ? _rawTickets : [];
+
+  // Handle both { data: { data: [...] } } and { data: [...] } response formats
+  const _rawTickets = (() => {
+    const d = (ticketsData as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    if (Array.isArray(d.tickets)) return d.tickets;
+    return [];
+  })();
+  const tickets: any[] = _rawTickets;
   const _rawFaq = (faqData as any)?.data?.faq ?? (faqData as any)?.data;
   const faq: any[] = Array.isArray(_rawFaq) ? _rawFaq : [];
 
@@ -66,6 +81,18 @@ export default function SupportPage() {
     onError: (e: any) => {
       toast.error(e?.response?.data?.message || 'Erreur lors de la création du ticket. Réessayez.');
     },
+  });
+
+  const replyMutation = useMutation({
+    mutationFn: () => apiClient.post(`/support/tickets/${replyTicket?.id}/reply`, { content: replyContent }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      setShowReply(false);
+      setReplyContent('');
+      setReplyTicket(null);
+      toast.success('Réponse envoyée !', { duration: 5000 });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de l\'envoi'),
   });
 
   const ticketStatusIcon = (status: string) => {
@@ -236,16 +263,22 @@ export default function SupportPage() {
           ) : tickets.map((ticket: any) => (
             <motion.div key={ticket.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="bg-[#111118] border border-white/5 rounded-xl p-5 hover:border-white/10 transition-colors">
               <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
                   <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                     {ticketStatusIcon(ticket.status)}
                   </div>
-                  <div>
-                    <div className="text-sm font-medium text-white">{ticket.subject}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-white truncate">{ticket.subject}</div>
                     <div className="text-xs text-gray-500 mt-0.5">#{ticket.id?.slice(0, 8)} · {formatRelative(ticket.createdAt)}</div>
+                    {ticket.messages?.[0] && (
+                      <div className="text-xs text-gray-400 mt-1 truncate">{ticket.messages[0].content}</div>
+                    )}
+                    {ticket.lastMessage && (
+                      <div className="text-xs text-gray-400 mt-1 truncate">{ticket.lastMessage}</div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                   <span className={cn('text-xs px-2 py-0.5 rounded-full', {
                     'bg-blue-500/10 text-blue-400': ticket.status === 'OPEN',
                     'bg-yellow-500/10 text-yellow-400': ticket.status === 'IN_PROGRESS' || ticket.status === 'WAITING',
@@ -257,6 +290,15 @@ export default function SupportPage() {
                     'bg-orange-500/10 text-orange-400': ticket.priority === 'HIGH',
                     'bg-red-500/10 text-red-400': ticket.priority === 'URGENT',
                   })}>{TICKET_PRIORITY[ticket.priority as keyof typeof TICKET_PRIORITY] || ticket.priority}</span>
+                  {ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED' && (
+                    <button
+                      onClick={() => { setReplyTicket(ticket); setShowReply(true); }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/20 transition-colors"
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                      Répondre
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -274,6 +316,42 @@ export default function SupportPage() {
               <div className="text-xs text-gray-400">{item.answer}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Reply modal */}
+      {showReply && replyTicket && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Répondre au ticket</h3>
+              <button onClick={() => { setShowReply(false); setReplyContent(''); }} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="mb-3 p-3 bg-white/5 rounded-lg">
+              <div className="text-xs text-gray-400">Sujet</div>
+              <div className="text-sm text-white mt-0.5">{replyTicket.subject}</div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 mb-1.5 block">Votre message</label>
+              <textarea
+                className="input-field w-full resize-none"
+                rows={5}
+                placeholder="Écrivez votre réponse..."
+                value={replyContent}
+                onChange={e => setReplyContent(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => { setShowReply(false); setReplyContent(''); }} className="btn-secondary flex-1">Annuler</button>
+              <button
+                onClick={() => replyMutation.mutate()}
+                disabled={!replyContent.trim() || replyMutation.isPending}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {replyMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Envoyer</>}
+              </button>
+            </div>
+          </motion.div>
         </div>
       )}
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Settings, Save, Loader2, Shield, Bell, Globe, Coins, RefreshCw } from 'lucide-react';
+import { Settings, Save, Loader2, Shield, Bell, Globe, Coins, RefreshCw, AlertTriangle } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
@@ -33,7 +33,13 @@ export default function AdminSettingsPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => apiClient.post('/admin/settings', { general: generalSettings, coins: coinsSettings }),
-    onSuccess: () => toast.success('Paramètres sauvegardés'),
+    onSuccess: () => {
+      // Apply language setting to document
+      if (typeof document !== 'undefined') {
+        document.documentElement.lang = generalSettings.defaultLanguage;
+      }
+      toast.success('Paramètres sauvegardés avec succès', { duration: 5000 });
+    },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la sauvegarde'),
   });
 
@@ -78,6 +84,18 @@ export default function AdminSettingsPage() {
               <textarea className="input-field w-full resize-none" rows={2} value={generalSettings.siteDescription} onChange={e => setGeneralSettings(s => ({ ...s, siteDescription: e.target.value }))} />
             </div>
           </div>
+          {generalSettings.maintenanceMode && (
+            <div className="flex items-start gap-3 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-orange-400 font-semibold text-sm">Mode maintenance actif</div>
+                <div className="text-xs text-orange-300/70 mt-0.5">
+                  Le site est inaccessible pour les utilisateurs normaux. Seuls les admins peuvent se connecter.
+                  Désactivez ce mode dès que la maintenance est terminée.
+                </div>
+              </div>
+            </div>
+          )}
           <div className="space-y-3">
             {[
               { key: 'maintenanceMode', label: 'Mode maintenance', desc: 'Désactive l\'accès au site pour les utilisateurs non-admin' },
@@ -85,12 +103,12 @@ export default function AdminSettingsPage() {
             ].map(item => (
               <div key={item.key} className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm text-white">{item.label}</div>
+                  <div className={`text-sm ${item.key === 'maintenanceMode' && generalSettings.maintenanceMode ? 'text-orange-400' : 'text-white'}`}>{item.label}</div>
                   <div className="text-xs text-gray-500">{item.desc}</div>
                 </div>
                 <button
                   onClick={() => setGeneralSettings(s => ({ ...s, [item.key]: !(s as any)[item.key] }))}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${(generalSettings as any)[item.key] ? 'bg-purple-600' : 'bg-white/10'}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${(generalSettings as any)[item.key] ? item.key === 'maintenanceMode' ? 'bg-orange-500' : 'bg-purple-600' : 'bg-white/10'}`}
                 >
                   <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${(generalSettings as any)[item.key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>

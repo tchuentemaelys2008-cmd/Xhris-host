@@ -86,9 +86,16 @@ export default function SettingsPage() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['profile'] });
+      // Persist to localStorage for immediate use
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('xhris_language', settings.language);
+        localStorage.setItem('xhris_currency', settings.currency);
+      }
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      toast.success('Paramètres enregistrés !');
+      toast.success('Paramètres enregistrés ! Rechargement en cours...', { duration: 5000 });
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la sauvegarde'),
   });

@@ -26,9 +26,16 @@ export default function AdminMessagesPage() {
     queryFn: () => adminApi.getMessages({ page, limit: 20 }),
   });
 
-  const _raw_tickets = (data as any)?.data?.tickets ?? [];
-  const tickets: any[] = Array.isArray(_raw_tickets) ? _raw_tickets : [];
-  const total: number = (data as any)?.data?.total || 0;
+  const _raw_tickets = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    if (Array.isArray(d.tickets)) return d.tickets;
+    return [];
+  })();
+  const tickets: any[] = _raw_tickets;
+  const total: number = (data as any)?.data?.total || tickets.length;
 
   const replyMutation = useMutation({
     mutationFn: () => adminApi.replyMessage(selected.id, reply),

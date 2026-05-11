@@ -6,10 +6,11 @@ import { motion } from 'framer-motion';
 import {
   Users, Search, Filter, Plus, Eye, Pencil, MoreVertical,
   Ban, Coins, CheckCircle, XCircle, UserX, Loader2,
-  TrendingUp, Crown, Shield, User
+  TrendingUp, Crown, Shield, User, X
 } from 'lucide-react';
-import { adminApi } from '@/lib/api';
+import { adminApi, apiClient } from '@/lib/api';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
+import toast from 'react-hot-toast';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis } from 'recharts';
 
 const ROLE_COLORS: Record<string, string> = {
@@ -31,11 +32,12 @@ export default function AdminUsersPage() {
   const [coinsAmount, setCoinsAmount] = useState('');
   const [coinsReason, setCoinsReason] = useState('');
   const [banReason, setBanReason] = useState('');
-  const [showModal, setShowModal] = useState<'ban' | 'coins' | 'edit' | null>(null);
+  const [showModal, setShowModal] = useState<'ban' | 'coins' | 'edit' | 'create' | null>(null);
+  const [createForm, setCreateForm] = useState({ name: '', email: '', role: 'USER', plan: 'FREE' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-users', search, roleFilter, statusFilter, page],
-    queryFn: () => adminApi.getUsers({ search: search || undefined, role: roleFilter || undefined, status: statusFilter || undefined, page, limit: 10 }),
+    queryFn: () => adminApi.getUsers({ search: search || undefined, role: roleFilter || undefined, status: statusFilter || undefined, page, limit: 20 }),
   });
 
   const { data: statsData } = useQuery({ queryKey: ['admin-stats'], queryFn: () => adminApi.getDashboardStats() });
@@ -43,7 +45,7 @@ export default function AdminUsersPage() {
   const _raw_users = (data as any)?.data?.users ?? [];
   const users: any[] = Array.isArray(_raw_users) ? _raw_users : [];
   const total: number = (data as any)?.data?.total || 0;
-  const totalPages = Math.ceil(total / 10);
+  const totalPages = Math.ceil(total / 20);
   const stats = (statsData as any)?.data || {};
 
   const banMutation = useMutation({
@@ -58,7 +60,19 @@ export default function AdminUsersPage() {
 
   const coinsMutation = useMutation({
     mutationFn: () => adminApi.addCoins(actionUser.id, Number(coinsAmount), coinsReason),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); setShowModal(null); setCoinsAmount(''); setCoinsReason(''); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); setShowModal(null); setCoinsAmount(''); setCoinsReason(''); toast.success('Coins ajustés avec succès'); },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: () => apiClient.post('/admin/users', createForm),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      setShowModal(null);
+      setCreateForm({ name: '', email: '', role: 'USER', plan: 'FREE' });
+      toast.success('Utilisateur créé avec succès', { duration: 5000 });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la création'),
   });
 
   const pieData = [
@@ -74,7 +88,7 @@ export default function AdminUsersPage() {
           <h1 className="text-2xl font-bold text-white">Utilisateurs</h1>
           <p className="text-gray-400 text-sm mt-1">Gérez les utilisateurs de la plateforme</p>
         </div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => { setActionUser(null); setShowModal('edit'); }}>
+        <button className="btn-primary flex items-center gap-2" onClick={() => { setCreateForm({ name: '', email: '', role: 'USER', plan: 'FREE' }); setShowModal('create'); }}>
           <Plus className="w-4 h-4" />
           Ajouter un utilisateur
         </button>
@@ -210,7 +224,7 @@ export default function AdminUsersPage() {
                 {/* Pagination */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between p-4 border-t border-white/5">
-                    <div className="text-xs text-gray-400">Affichage de {(page - 1) * 10 + 1} à {Math.min(page * 10, total)} sur {total} utilisateurs</div>
+                    <div className="text-xs text-gray-400">Affichage de {(page - 1) * 20 + 1} à {Math.min(page * 20, total)} sur {total} utilisateurs</div>
                     <div className="flex gap-1">
                       <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">Précédent</button>
                       {Array.from({ length: Math.min(5, totalPages) }, (_, i) => i + 1).map(p => (
@@ -288,6 +302,59 @@ export default function AdminUsersPage() {
               <button onClick={() => setShowModal(null)} className="btn-secondary flex-1">Annuler</button>
               <button onClick={() => coinsMutation.mutate()} disabled={!coinsAmount || coinsMutation.isPending} className="btn-primary flex-1">
                 {coinsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Confirmer'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Create user modal */}
+      {showModal === 'create' && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Ajouter un utilisateur</h3>
+              <button onClick={() => setShowModal(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Nom *</label>
+                <input className="input-field w-full" placeholder="Nom complet" value={createForm.name} onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Email *</label>
+                <input type="email" className="input-field w-full" placeholder="email@exemple.com" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Rôle</label>
+                  <select className="input-field w-full" value={createForm.role} onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}>
+                    <option value="USER">Utilisateur</option>
+                    <option value="PREMIUM">Premium</option>
+                    <option value="MODERATOR">Modérateur</option>
+                    <option value="ADMIN">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Plan</label>
+                  <select className="input-field w-full" value={createForm.plan} onChange={e => setCreateForm(f => ({ ...f, plan: e.target.value }))}>
+                    <option value="FREE">Gratuit</option>
+                    <option value="STARTER">Starter</option>
+                    <option value="PRO">Pro</option>
+                    <option value="ADVANCED">Advanced</option>
+                    <option value="ELITE">Elite</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setShowModal(null)} className="btn-secondary flex-1">Annuler</button>
+              <button
+                onClick={() => createUserMutation.mutate()}
+                disabled={!createForm.name || !createForm.email || createUserMutation.isPending}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {createUserMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Créer'}
               </button>
             </div>
           </motion.div>

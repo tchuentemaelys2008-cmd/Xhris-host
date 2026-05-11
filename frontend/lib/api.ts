@@ -110,6 +110,7 @@ export const coinsApi = {
   getBalance: () => apiClient.get('/coins/balance'),
   getTransactions: (params?: any) =>
     apiClient.get('/coins/transactions', { params }),
+  getPacks: () => apiClient.get('/coins/packs'),
   transfer: (recipientId: string, amount: number) =>
     apiClient.post('/coins/transfer', { recipientId, amount }),
   claimDailyBonus: () => apiClient.post('/coins/daily-bonus'),
@@ -172,7 +173,7 @@ export const adminApi = {
     apiClient.post(`/admin/servers/${id}/restart`),
   getMessages: (params?: any) => apiClient.get('/admin/messages', { params }),
   replyMessage: (id: string, reply: string) =>
-    apiClient.post(`/admin/messages/${id}/reply`, { reply }),
+    apiClient.post(`/admin/messages/${id}/reply`, { content: reply }),
   getSubscriptions: (params?: any) =>
     apiClient.get('/admin/subscriptions', { params }),
 };

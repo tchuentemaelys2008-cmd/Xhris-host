@@ -15,7 +15,7 @@ export default function AdminFaqPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-faq'],
-    queryFn: () => apiClient.get('/support/faq'),
+    queryFn: () => apiClient.get('/admin/faq'),
   });
 
   const faqs: any[] = (() => {

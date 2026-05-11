@@ -109,7 +109,11 @@ export default function CoinsSharePage() {
     mutationFn: () => coinsApi.transfer(transferId.trim(), amountNum),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['coins-balance'] });
+      qc.refetchQueries({ queryKey: ['coins-balance'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions'] });
+      qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
+      const recipientName = recipient?.name || 'l\'utilisateur';
+      toast.success(`${amountNum} Coins envoyés à ${recipientName} avec succès !`, { duration: 5000 });
       setTransferId('');
       setTransferAmount('');
       setNote('');
@@ -117,7 +121,6 @@ export default function CoinsSharePage() {
       setLookupState('idle');
       setSent(true);
       setTimeout(() => setSent(false), 3000);
-      toast.success('Coins envoyés avec succès !');
     },
     onError: (e: any) => {
       const msg = e?.response?.data?.message || 'Erreur lors du transfert';

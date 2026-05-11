@@ -1,246 +1,263 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { CheckCircle, XCircle } from 'lucide-react';
+import {
+  CreditCard, CheckCircle, XCircle, Clock, Loader2, Search,
+  DollarSign, TrendingDown, AlertCircle, Filter
+} from 'lucide-react';
+import { apiClient } from '@/lib/api';
+import toast from 'react-hot-toast';
+import { cn } from '@/lib/utils';
 
-const methods = [
-  { id: 'card', icon: '💳', label: 'Carte bancaire', desc: 'Retrait sur votre carte bancaire', fees: '1.5%', selected: true },
-  { id: 'paypal', icon: '🅿️', label: 'PayPal', desc: 'Retrait sur votre compte PayPal', fees: '2.5%' },
-  { id: 'crypto', icon: '₿', label: 'Cryptomonnaie', desc: 'Retrait en USDT, BTC, ETH...', fees: '1.0%' },
-  { id: 'bank', icon: '🏦', label: 'Virement bancaire', desc: 'Virement SEPA/IBAN', fees: '0.5%' },
-];
+const STATUS_LABELS: Record<string, string> = {
+  PENDING: 'En attente',
+  APPROVED: 'Approuvé',
+  REJECTED: 'Rejeté',
+  PROCESSING: 'En cours',
+};
 
-const recent = [
-  { amount: '€250.00', method: 'PayPal', date: '12 Dec 2024, 14:30', status: 'Réussi', col: 'text-green-400' },
-  { amount: '€1,000.00', method: 'Carte bancaire', date: '10 Dec 2024, 10:15', status: 'Réussi', col: 'text-green-400' },
-  { amount: '€500.00', method: 'Cryptomonnaie', date: '08 Dec 2024, 16:45', status: 'Réussi', col: 'text-green-400' },
-  { amount: '€750.00', method: 'Virement bancaire', date: '06 Dec 2024, 09:20', status: 'En cours', col: 'text-yellow-400' },
-  { amount: '€200.00', method: 'Carte bancaire', date: '04 Dec 2024, 11:30', status: 'Réussi', col: 'text-green-400' },
-];
+const STATUS_COLORS: Record<string, string> = {
+  PENDING: 'text-yellow-400 bg-yellow-500/10',
+  APPROVED: 'text-green-400 bg-green-500/10',
+  REJECTED: 'text-red-400 bg-red-500/10',
+  PROCESSING: 'text-blue-400 bg-blue-500/10',
+};
 
-const amounts = ['€100', '€250', '€500', '€1,000'];
+export default function AdminWithdrawalsPage() {
+  const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
-export default function WithdrawalsPage() {
-  const [selected, setSelected] = useState('card');
-  const [amount, setAmount] = useState('500');
-  const [step, setStep] = useState(1);
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-withdrawals', statusFilter, page],
+    queryFn: () => apiClient.get('/admin/withdrawals', { params: { page, limit: 20, status: statusFilter || undefined } }),
+  });
 
-  const fee = parseFloat(amount) * 0.015;
-  const receive = parseFloat(amount) - fee;
+  const withdrawals: any[] = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    if (Array.isArray(d.withdrawals)) return d.withdrawals;
+    return [];
+  })();
+  const total: number = (data as any)?.data?.total || withdrawals.length;
+  const totalPages = Math.ceil(total / 20);
+
+  const filteredWithdrawals = search
+    ? withdrawals.filter(w =>
+        w.user?.name?.toLowerCase().includes(search.toLowerCase()) ||
+        w.user?.email?.toLowerCase().includes(search.toLowerCase()) ||
+        w.id?.toLowerCase().includes(search.toLowerCase())
+      )
+    : withdrawals;
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => apiClient.post(`/admin/withdrawals/${id}/approve`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-withdrawals'] });
+      toast.success('Retrait approuvé', { duration: 5000 });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de l\'approbation'),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      apiClient.post(`/admin/withdrawals/${id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-withdrawals'] });
+      setRejectId(null);
+      setRejectReason('');
+      toast.success('Retrait rejeté', { duration: 5000 });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors du rejet'),
+  });
+
+  const pendingCount = withdrawals.filter(w => w.status === 'PENDING').length;
+  const approvedCount = withdrawals.filter(w => w.status === 'APPROVED').length;
+  const rejectedCount = withdrawals.filter(w => w.status === 'REJECTED').length;
+  const totalAmount = withdrawals.reduce((acc, w) => acc + (w.amount || 0), 0);
 
   return (
-    <div className="flex gap-6">
-      <div className="flex-1 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Retraits</h1>
-          <p className="text-gray-400 text-sm mt-1">Retirez vos fonds en toute sécurité sur votre méthode préférée.</p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-white">Retraits</h1>
+        <p className="text-gray-400 text-sm mt-1">Gérez les demandes de retrait des utilisateurs.</p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'En attente', value: pendingCount, icon: Clock, color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+          { label: 'Approuvés', value: approvedCount, icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/10' },
+          { label: 'Rejetés', value: rejectedCount, icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10' },
+          { label: 'Montant total', value: `€${totalAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}`, icon: DollarSign, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+        ].map(s => (
+          <div key={s.label} className="bg-[#111118] border border-white/5 rounded-xl p-4">
+            <div className={`w-8 h-8 ${s.bg} rounded-lg flex items-center justify-center mb-3`}>
+              <s.icon className={`w-4 h-4 ${s.color}`} />
+            </div>
+            <div className="text-xl font-bold text-white">{s.value}</div>
+            <div className="text-xs text-gray-400">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <input
+            className="input-field pl-10 w-full"
+            placeholder="Rechercher par utilisateur ou ID..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          className="input-field w-full sm:w-40"
+          value={statusFilter}
+          onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+        >
+          <option value="">Tous les statuts</option>
+          <option value="PENDING">En attente</option>
+          <option value="APPROVED">Approuvé</option>
+          <option value="REJECTED">Rejeté</option>
+          <option value="PROCESSING">En cours</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-[#111118] border border-white/5 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[600px]">
+            <thead>
+              <tr className="border-b border-white/5">
+                {['ID', 'Utilisateur', 'Montant', 'Méthode', 'Statut', 'Date', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-gray-500 font-medium">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {isLoading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    {Array.from({ length: 7 }).map((_, j) => (
+                      <td key={j} className="px-4 py-3"><div className="h-3 bg-white/5 rounded animate-pulse" /></td>
+                    ))}
+                  </tr>
+                ))
+              ) : filteredWithdrawals.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                    <TrendingDown className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    Aucun retrait trouvé
+                  </td>
+                </tr>
+              ) : filteredWithdrawals.map((w: any) => (
+                <motion.tr key={w.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="hover:bg-white/2 transition-colors">
+                  <td className="px-4 py-3 text-purple-400 font-mono">#{w.id?.slice(0, 8)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 bg-purple-500/20 rounded-full flex items-center justify-center text-[10px] text-purple-400 flex-shrink-0">
+                        {w.user?.name?.[0]?.toUpperCase() || 'U'}
+                      </div>
+                      <div>
+                        <div className="text-white">{w.user?.name || '—'}</div>
+                        <div className="text-gray-500 text-[10px]">{w.user?.email || '—'}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-white font-medium">
+                    €{(w.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">{w.method || '—'}</td>
+                  <td className="px-4 py-3">
+                    <span className={cn('text-[10px] px-2 py-0.5 rounded-full', STATUS_COLORS[w.status] || 'text-gray-400 bg-white/5')}>
+                      {STATUS_LABELS[w.status] || w.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">
+                    {w.createdAt ? new Date(w.createdAt).toLocaleDateString('fr-FR') : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {w.status === 'PENDING' && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => approveMutation.mutate(w.id)}
+                          disabled={approveMutation.isPending}
+                          className="flex items-center gap-1 text-[10px] px-2 py-1 bg-green-500/10 border border-green-500/20 text-green-400 rounded-lg hover:bg-green-500/20 transition-colors"
+                          title="Approuver"
+                        >
+                          <CheckCircle className="w-3 h-3" />
+                          Approuver
+                        </button>
+                        <button
+                          onClick={() => { setRejectId(w.id); setRejectReason(''); }}
+                          className="flex items-center gap-1 text-[10px] px-2 py-1 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors"
+                          title="Rejeter"
+                        >
+                          <XCircle className="w-3 h-3" />
+                          Rejeter
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        {/* Step 1 - Method */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-          <h2 className="font-semibold text-white mb-4">1. Sélectionner une méthode de retrait</h2>
-          <div className="grid grid-cols-4 gap-3">
-            {methods.map(m => (
-              <motion.div
-                key={m.id}
-                whileHover={{ scale: 1.02 }}
-                onClick={() => setSelected(m.id)}
-                className={`relative p-4 rounded-xl border cursor-pointer transition-all ${selected === m.id ? 'border-purple-500 bg-purple-500/10' : 'border-white/5 bg-[#1A1A24] hover:border-white/20'}`}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-white/5">
+            <span className="text-xs text-gray-500">Total : {total} retraits</span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">Précédent</button>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">Suivant</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Reject modal */}
+      {rejectId && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-500/10 rounded-xl flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">Rejeter le retrait</h3>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 mb-1.5 block">Raison du rejet</label>
+              <textarea
+                className="input-field w-full resize-none"
+                rows={3}
+                placeholder="Expliquez pourquoi ce retrait est rejeté..."
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setRejectId(null)} className="btn-secondary flex-1">Annuler</button>
+              <button
+                onClick={() => rejectMutation.mutate({ id: rejectId, reason: rejectReason })}
+                disabled={!rejectReason.trim() || rejectMutation.isPending}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {selected === m.id && (
-                  <div className="absolute top-2 right-2 w-5 h-5 bg-purple-600 rounded-full flex items-center justify-center">
-                    <CheckCircle className="w-3.5 h-3.5 text-white" />
-                  </div>
-                )}
-                <div className="text-2xl mb-2">{m.icon}</div>
-                <div className="text-sm font-semibold text-white mb-0.5">{m.label}</div>
-                <div className="text-xs text-gray-400 mb-2">{m.desc}</div>
-                <div className="text-xs text-purple-400 font-medium">Frais: {m.fees}</div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-
-        {/* Step 2 - Details */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-          <h2 className="font-semibold text-white mb-4">2. Détails du retrait</h2>
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="mb-4">
-                <label className="text-xs text-gray-400 block mb-1.5">Montant à retirer</label>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 bg-[#1A1A24] border border-white/10 rounded-lg px-3 py-2.5 flex-1">
-                    <span className="text-gray-400 text-sm">€</span>
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={e => setAmount(e.target.value)}
-                      className="bg-transparent text-white text-lg font-bold outline-none flex-1 w-full"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  {amounts.map(a => (
-                    <button
-                      key={a}
-                      onClick={() => setAmount(a.replace('€', '').replace(',', ''))}
-                      className={`px-3 py-1.5 rounded-lg text-xs transition-all ${amount === a.replace('€', '').replace(',', '') ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
-                    >
-                      {a}
-                    </button>
-                  ))}
-                  <button className="px-3 py-1.5 rounded-lg text-xs bg-white/5 text-gray-400 hover:bg-white/10">Max</button>
-                </div>
-                <div className="mt-3 bg-[#1A1A24] rounded-lg p-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-gray-400">Vous recevrez</div>
-                    <div className="text-xl font-bold text-green-400">€{isNaN(receive) ? '0.00' : receive.toFixed(2)}</div>
-                    <div className="text-xs text-gray-500">Estimation après frais</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card info */}
-              <div>
-                <div className="text-sm font-medium text-white mb-3">Informations de paiement</div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Titulaire de la carte</label>
-                    <input className="input-field" defaultValue="Jean Dupont" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Numéro de carte</label>
-                    <div className="relative">
-                      <input className="input-field pr-12" defaultValue="•••• •••• •••• 4242" />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm">💳</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">Date d'expiration</label>
-                      <input className="input-field" defaultValue="12 / 26" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">Code CVV</label>
-                      <input className="input-field" type="password" defaultValue="123" />
-                    </div>
-                  </div>
-                </div>
-              </div>
+                {rejectMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><XCircle className="w-4 h-4" /> Rejeter</>}
+              </button>
             </div>
-
-            {/* Summary */}
-            <div>
-              <div className="text-sm font-medium text-white mb-3">3. Résumé du retrait</div>
-              <div className="bg-[#1A1A24] border border-white/5 rounded-xl p-4 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Montant demandé</span>
-                  <span className="text-white font-medium">€{amount || '0'}.00</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Frais de traitement (1.5%)</span>
-                  <span className="text-red-400 font-medium">- €{isNaN(fee) ? '0.00' : fee.toFixed(2)}</span>
-                </div>
-                <div className="border-t border-white/10 pt-3 flex justify-between">
-                  <span className="text-white font-semibold">Vous recevrez</span>
-                  <span className="text-green-400 font-bold text-lg">€{isNaN(receive) ? '0.00' : receive.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span>⏱</span>
-                  <span>Délai de traitement estimé</span>
-                  <span className="text-yellow-400 font-medium ml-auto">24h à 48h</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-5">
-                <button className="flex-1 btn-secondary flex items-center justify-center gap-2 text-sm">
-                  ← Retour
-                </button>
-                <button className="flex-1 btn-primary flex items-center justify-center gap-2 text-sm">
-                  🔒 Confirmer le retrait
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 text-center mt-3">
-                En confirmant ce retrait, vous acceptez nos{' '}
-                <a href="#" className="text-purple-400 hover:underline">conditions générales de retrait</a>.
-              </p>
-            </div>
-          </div>
+          </motion.div>
         </div>
-      </div>
-
-      {/* Right sidebar */}
-      <div className="w-56 flex-shrink-0 space-y-4">
-        {/* Account summary */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Résumé du compte</h3>
-          {[
-            { l: 'Solde disponible', v: '€8,732.20', col: 'text-green-400' },
-            { l: 'Retraits en attente', v: '€1,567.80', col: 'text-yellow-400' },
-            { l: 'Total retiré', v: '€24,578.50' },
-            { l: 'Limite mensuelle', v: '€20,000.00' },
-          ].map(s => (
-            <div key={s.l} className="flex justify-between py-2 border-b border-white/5 last:border-0 text-xs">
-              <span className="text-gray-400">{s.l}</span>
-              <span className={(s as any).col || 'text-white font-medium'}>{s.v}</span>
-            </div>
-          ))}
-          <div className="mt-3">
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>Utilisé ce mois-ci</span>
-              <span className="text-white">43.7%</span>
-            </div>
-            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-600 rounded-full" style={{ width: '43.7%' }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Important info */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Informations importantes</h3>
-          {[
-            'Délai de traitement : 24h à 48h ouvrées',
-            'Retraits minimum : €10',
-            'Limite maximale par retrait : €5,000',
-            'Vérifiez bien vos informations avant de confirmer',
-            'Les frais varient selon la méthode choisie',
-          ].map((info, i) => (
-            <div key={i} className="flex items-start gap-2 mb-2 text-xs text-gray-400">
-              <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" />
-              <span>{info}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Recent withdrawals */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-white">Retraits récents</h3>
-            <button className="text-xs text-purple-400 hover:text-purple-300">Voir tout</button>
-          </div>
-          <div className="space-y-3">
-            {recent.map((r, i) => (
-              <div key={i} className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-white">{r.amount}</div>
-                  <div className="text-xs text-gray-400">{r.method}</div>
-                  <div className="text-xs text-gray-500">{r.date}</div>
-                </div>
-                <span className={`text-xs font-medium ${r.col}`}>{r.status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Help */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-2">Besoin d'aide ?</h3>
-          <p className="text-xs text-gray-400 mb-3">Si vous avez des questions concernant vos retraits, notre équipe est là pour vous aider.</p>
-          <button className="w-full btn-primary text-xs py-2">💬 Contacter le support</button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

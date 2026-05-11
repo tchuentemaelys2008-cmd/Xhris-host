@@ -1,295 +1,178 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Download, RefreshCw, Plus, Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import {
+  Save, Database, Clock, CheckCircle, XCircle, Plus,
+  Download, RefreshCw, Loader2, ChevronLeft, ChevronRight, Search
+} from 'lucide-react';
+import { apiClient } from '@/lib/api';
+import toast from 'react-hot-toast';
+import { cn } from '@/lib/utils';
 
-const tabs = ['Vue d\'ensemble', 'Sauvegardes manuelles', 'Planification', 'Stockage', 'Restauration', 'Paramètres'];
-
-const backups = [
-  { date: '18 Mai 2024, 03:15:22', type: 'Automatique', source: 'Base de données + Fichiers', size: '12.4 GB', status: 'Réussie', retention: '30 jours' },
-  { date: '17 Mai 2024, 15:00:11', type: 'Planifiée',   source: 'Base de données',             size: '3.2 GB',  status: 'Réussie', retention: '30 jours' },
-  { date: '17 Mai 2024, 03:15:18', type: 'Automatique', source: 'Base de données + Fichiers', size: '11.8 GB', status: 'Réussie', retention: '30 jours' },
-  { date: '16 Mai 2024, 15:00:09', type: 'Planifiée',   source: 'Fichiers uniquement',         size: '8.7 GB',  status: 'Réussie', retention: '30 jours' },
-  { date: '16 Mai 2024, 03:15:14', type: 'Automatique', source: 'Base de données + Fichiers', size: '12.1 GB', status: 'Échouée', retention: '30 jours' },
-  { date: '15 Mai 2024, 15:00:10', type: 'Planifiée',   source: 'Base de données',             size: '3.1 GB',  status: 'Réussie', retention: '30 jours' },
-  { date: '15 Mai 2024, 03:15:19', type: 'Automatique', source: 'Base de données + Fichiers', size: '11.9 GB', status: 'Réussie', retention: '30 jours' },
-  { date: '14 Mai 2024, 15:00:12', type: 'Planifiée',   source: 'Fichiers uniquement',         size: '8.6 GB',  status: 'Réussie', retention: '30 jours' },
-];
-
-const storageData = [
-  { name: 'Base de données', value: 49, color: '#7C3AED', size: '120.4 GB' },
-  { name: 'Fichiers',        value: 40, color: '#3B82F6', size: '98.7 GB' },
-  { name: 'Logs',            value: 6,  color: '#EAB308', size: '15.3 GB' },
-  { name: 'Autres',          value: 5,  color: '#6B7280', size: '11.2 GB' },
-];
-
-export default function BackupsPage() {
-  const [activeTab, setActiveTab] = useState('Vue d\'ensemble');
+export default function AdminBackupsPage() {
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
-  const [dbChecked, setDbChecked] = useState(true);
-  const [filesChecked, setFilesChecked] = useState(true);
+  const [creating, setCreating] = useState(false);
 
-  const typeBadge = (t: string) => (
-    <span className={`badge text-xs ${t === 'Automatique' ? 'bg-blue-500/20 text-blue-400' : t === 'Planifiée' ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-500/20 text-gray-400'}`}>{t}</span>
-  );
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-backups', page],
+    queryFn: () => apiClient.get('/admin/backups', { params: { page, limit: 15 } }),
+  });
 
-  const statusBadge = (s: string) => (
-    s === 'Réussie'
-      ? <span className="badge-green text-xs flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-400 rounded-full" />{s}</span>
-      : <span className="badge bg-red-500/20 text-red-400 text-xs flex items-center gap-1"><span className="w-1.5 h-1.5 bg-red-400 rounded-full" />{s}</span>
-  );
+  const backups: any[] = (() => {
+    const d = (data as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    if (Array.isArray(d.backups)) return d.backups;
+    return [];
+  })();
+  const total: number = (data as any)?.data?.total || backups.length;
+  const totalPages = Math.ceil(total / 15);
+
+  const createMutation = useMutation({
+    mutationFn: () => apiClient.post('/admin/backups'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-backups'] });
+      toast.success('Sauvegarde créée avec succès', { duration: 5000 });
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la création'),
+  });
+
+  const successCount = backups.filter(b => b.status === 'SUCCESS' || b.status === 'COMPLETED' || b.success).length;
+  const failCount = backups.filter(b => b.status === 'FAILED' || b.status === 'ERROR' || (b.success === false)).length;
 
   return (
-    <div className="flex gap-6">
-      <div className="flex-1 space-y-6">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Sauvegardes</h1>
-          <p className="text-gray-400 text-sm mt-1">Protégez vos données avec des sauvegardes sécurisées et planifiées.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Sauvegardes</h1>
+          <p className="text-gray-400 text-sm">Gérez et créez des sauvegardes de la base de données</p>
         </div>
+        <button
+          onClick={() => createMutation.mutate()}
+          disabled={createMutation.isPending}
+          className="btn-primary flex items-center gap-2 text-sm w-fit"
+        >
+          {createMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Plus className="w-4 h-4" />
+          )}
+          Créer une sauvegarde
+        </button>
+      </div>
 
-        {/* Tabs */}
-        <div className="flex gap-0 border-b border-white/5">
-          {tabs.map(t => (
-            <button key={t} onClick={() => setActiveTab(t)} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${activeTab === t ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-400 hover:text-white'}`}>{t}</button>
-          ))}
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-4">
-          {[
-            { icon: '📅', label: 'Dernière sauvegarde', v: 'Aujourd\'hui à 03:15', sub: '18 Mai 2024, 03:15:22', badge: 'Réussie', badgeColor: 'text-green-400 bg-green-500/10' },
-            { icon: '⏰', label: 'Prochaine sauvegarde', v: 'Aujourd\'hui à 15:00', sub: 'Dans 6h 32m', badge: 'Planifiée', badgeColor: 'text-blue-400 bg-blue-500/10' },
-            { icon: '📦', label: 'Total des sauvegardes', v: '128', sub: '+18 ce mois-ci', badge: null, badgeColor: '' },
-            { icon: '💾', label: 'Espace utilisé', v: '245.6 GB / 500 GB', sub: '49% utilisé', badge: null, badgeColor: '' },
-          ].map((s, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="bg-[#111118] border border-white/5 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-8 h-8 bg-purple-500/10 rounded-lg flex items-center justify-center text-base">{s.icon}</div>
-                <span className="text-xs text-gray-400">{s.label}</span>
-              </div>
-              <div className="text-lg font-bold text-white">{s.v}</div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-gray-500">{s.sub}</span>
-                {s.badge && <span className={`badge text-xs ${s.badgeColor}`}>{s.badge}</span>}
-              </div>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Backup history table */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl">
-          <div className="p-4 border-b border-white/5 flex items-center justify-between">
-            <h2 className="font-semibold text-white">Historique des sauvegardes</h2>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-                <input className="bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 w-44" placeholder="Rechercher..." />
-              </div>
-              <button className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
-                <Search className="w-3.5 h-3.5" /> Filtres
-              </button>
-              <button className="btn-primary text-xs flex items-center gap-1.5 py-1.5">
-                <Plus className="w-3.5 h-3.5" /> Nouvelle sauvegarde
-              </button>
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'Total sauvegardes', value: total, icon: Database, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+          { label: 'Réussies', value: successCount, icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/10' },
+          { label: 'Échouées', value: failCount, icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10' },
+          { label: 'Taux de succès', value: total > 0 ? `${Math.round((successCount / total) * 100)}%` : '—', icon: Save, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+        ].map(s => (
+          <div key={s.label} className="bg-[#111118] border border-white/5 rounded-xl p-4">
+            <div className={`w-8 h-8 ${s.bg} rounded-lg flex items-center justify-center mb-3`}>
+              <s.icon className={`w-4 h-4 ${s.color}`} />
             </div>
+            <div className="text-xl font-bold text-white">{isLoading ? '...' : s.value}</div>
+            <div className="text-xs text-gray-400">{s.label}</div>
           </div>
+        ))}
+      </div>
 
-          <table className="w-full text-sm">
+      {/* Backups table */}
+      <div className="bg-[#111118] border border-white/5 rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-white/5 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-white">Historique des sauvegardes</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[500px]">
             <thead>
               <tr className="border-b border-white/5">
-                {['DATE & HEURE', 'TYPE', 'SOURCE', 'TAILLE', 'STATUT', 'RÉTENTION', 'ACTIONS'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs text-gray-500 font-medium">{h}</th>
+                {['Date & Heure', 'Type', 'Taille', 'Statut', 'Rétention', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-gray-500 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {backups.map((b, i) => (
-                <motion.tr key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.04 }} className="hover:bg-white/2 transition-colors">
-                  <td className="px-4 py-3 text-xs text-gray-300 font-mono">{b.date}</td>
-                  <td className="px-4 py-3">{typeBadge(b.type)}</td>
-                  <td className="px-4 py-3 text-xs text-gray-300">{b.source}</td>
-                  <td className="px-4 py-3 text-xs text-white font-medium">{b.size}</td>
-                  <td className="px-4 py-3">{statusBadge(b.status)}</td>
-                  <td className="px-4 py-3 text-xs text-gray-400">{b.retention}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button className="text-gray-400 hover:text-white transition-colors"><Download className="w-4 h-4" /></button>
-                      <button className="text-gray-400 hover:text-white transition-colors"><RefreshCw className="w-3.5 h-3.5" /></button>
-                      <button className="text-gray-400 hover:text-white transition-colors text-base">⋯</button>
-                    </div>
+              {isLoading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <td key={j} className="px-4 py-3"><div className="h-3 bg-white/5 rounded animate-pulse" /></td>
+                    ))}
+                  </tr>
+                ))
+              ) : backups.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                    <Database className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    Aucune sauvegarde enregistrée. Les sauvegardes créées apparaîtront ici.
                   </td>
-                </motion.tr>
-              ))}
+                </tr>
+              ) : backups.map((b: any, i: number) => {
+                const isSuccess = b.status === 'SUCCESS' || b.status === 'COMPLETED' || b.success === true;
+                const isFailed = b.status === 'FAILED' || b.status === 'ERROR' || b.success === false;
+                return (
+                  <motion.tr key={b.id || i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="hover:bg-white/2 transition-colors">
+                    <td className="px-4 py-3 text-gray-300 font-mono text-[10px]">
+                      {b.createdAt ? new Date(b.createdAt).toLocaleString('fr-FR') : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full', b.type === 'AUTO' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400')}>
+                        {b.type === 'AUTO' ? 'Automatique' : b.type === 'MANUAL' ? 'Manuelle' : b.type || 'Manuelle'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-white font-medium">{b.size || b.fileSize || '—'}</td>
+                    <td className="px-4 py-3">
+                      {isSuccess ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full text-green-400 bg-green-500/10 flex items-center gap-1 w-fit">
+                          <CheckCircle className="w-3 h-3" /> Réussie
+                        </span>
+                      ) : isFailed ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full text-red-400 bg-red-500/10 flex items-center gap-1 w-fit">
+                          <XCircle className="w-3 h-3" /> Échouée
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full text-yellow-400 bg-yellow-500/10 flex items-center gap-1 w-fit">
+                          <Clock className="w-3 h-3" /> En cours
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-400">{b.retentionDays ? `${b.retentionDays} jours` : b.retention || '30 jours'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        {b.downloadUrl && (
+                          <a href={b.downloadUrl} className="text-gray-400 hover:text-white transition-colors p-1" title="Télécharger">
+                            <Download className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                );
+              })}
             </tbody>
           </table>
+        </div>
 
-          {/* Pagination */}
-          <div className="px-4 py-3 border-t border-white/5 flex items-center justify-between text-xs text-gray-400">
-            <span>Affichage de 1 à 8 sur 128 sauvegardes</span>
-            <div className="flex gap-1">
-              <button className="w-7 h-7 bg-white/5 rounded flex items-center justify-center hover:bg-white/10" onClick={() => setPage(Math.max(1, page-1))}>
-                <ChevronLeft className="w-3.5 h-3.5" />
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-white/5">
+            <span className="text-xs text-gray-500">Total : {total} sauvegardes</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-secondary px-2 py-1 text-xs disabled:opacity-40">
+                <ChevronLeft className="w-4 h-4" />
               </button>
-              {[1, 2, 3, '...', 16].map((p, i) => (
-                <button key={i} onClick={() => typeof p === 'number' && setPage(p)} className={`w-7 h-7 rounded text-xs ${page === p ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>{p}</button>
-              ))}
-              <button className="w-7 h-7 bg-white/5 rounded flex items-center justify-center hover:bg-white/10" onClick={() => setPage(Math.min(16, page+1))}>
-                <ChevronRight className="w-3.5 h-3.5" />
+              <span className="text-xs text-white">{page} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="btn-secondary px-2 py-1 text-xs disabled:opacity-40">
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
-        </div>
-
-        {/* Manual + Schedule */}
-        <div className="grid grid-cols-2 gap-6">
-          {/* Manual backup */}
-          <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-            <h3 className="font-semibold text-white mb-1">Sauvegarde manuelle</h3>
-            <p className="text-xs text-gray-400 mb-4">Créez une sauvegarde manuelle de vos données à tout moment.</p>
-            <div className="text-xs text-gray-400 mb-3">Source de la sauvegarde</div>
-            <div className="space-y-2 mb-5">
-              {[
-                { label: 'Base de données', desc: 'Sauvegarder toutes les bases de données.', checked: dbChecked, set: setDbChecked },
-                { label: 'Fichiers', desc: 'Sauvegarder tous les fichiers et configurations.', checked: filesChecked, set: setFilesChecked },
-              ].map(opt => (
-                <label key={opt.label} className="flex items-start gap-3 cursor-pointer">
-                  <div
-                    onClick={() => opt.set(!opt.checked)}
-                    className={`w-4.5 h-4.5 w-5 h-5 rounded flex items-center justify-center mt-0.5 flex-shrink-0 border transition-all ${opt.checked ? 'bg-purple-600 border-purple-600' : 'bg-white/5 border-white/20'}`}
-                  >
-                    {opt.checked && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                  </div>
-                  <div>
-                    <div className="text-sm text-white">{opt.label}</div>
-                    <div className="text-xs text-gray-500">{opt.desc}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-            <button className="btn-primary text-sm w-full py-2.5 flex items-center justify-center gap-2">
-              <Plus className="w-4 h-4" /> Créer une sauvegarde maintenant
-            </button>
-          </div>
-
-          {/* Schedule */}
-          <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-            <h3 className="font-semibold text-white mb-1">Planification des sauvegardes</h3>
-            <p className="text-xs text-gray-400 mb-4">Configurez la fréquence des sauvegardes automatiques.</p>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="text-xs text-gray-400 block mb-1.5">Fréquence</label>
-                <select className="input-field text-sm">
-                  <option>Tous les jours</option>
-                  <option>Toutes les heures</option>
-                  <option>Toutes les semaines</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1.5">Heure</label>
-                <input defaultValue="03:00" className="input-field text-sm" />
-              </div>
-            </div>
-            <div className="mb-5">
-              <label className="text-xs text-gray-400 block mb-1.5">Fuseau horaire</label>
-              <select className="input-field text-sm">
-                <option>Europe/Paris (UTC+01:00)</option>
-                <option>UTC</option>
-                <option>America/New_York</option>
-              </select>
-            </div>
-            <button className="btn-primary text-sm w-full py-2.5 flex items-center justify-center gap-2">
-              Enregistrer la planification
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Right sidebar */}
-      <div className="w-60 flex-shrink-0 space-y-4">
-        {/* Status */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-4">Statut des sauvegardes</h3>
-          <div className="flex justify-center mb-4">
-            <div className="relative w-28 h-28">
-              <ResponsiveContainer width={112} height={112}>
-                <PieChart>
-                  <Pie data={[{ value: 96 }, { value: 4 }]} cx="50%" cy="50%" innerRadius={36} outerRadius={52} startAngle={90} endAngle={-270} dataKey="value">
-                    <Cell fill="#22C55E" />
-                    <Cell fill="#EF4444" />
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <div className="text-2xl font-bold text-white">96%</div>
-                <div className="text-xs text-gray-400">Taux de réussite</div>
-              </div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2"><div className="w-2 h-2 bg-green-500 rounded-full" /><span className="text-gray-400">Réussies</span></div>
-              <span className="text-white font-medium">123 (96%)</span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2"><div className="w-2 h-2 bg-red-500 rounded-full" /><span className="text-gray-400">Échouées</span></div>
-              <span className="text-white font-medium">5 (4%)</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Storage */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-2">Utilisation du stockage</h3>
-          <div className="text-xl font-bold text-white mb-1">245.6 GB <span className="text-sm font-normal text-gray-400">/ 500 GB</span></div>
-          <div className="text-xs text-gray-400 mb-3">49% utilisé</div>
-          <div className="h-2 bg-white/5 rounded-full overflow-hidden mb-4">
-            <div className="h-full bg-purple-600 rounded-full" style={{ width: '49%' }} />
-          </div>
-          {storageData.map(s => (
-            <div key={s.name} className="flex items-center justify-between text-xs mb-2">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ background: s.color }} />
-                <span className="text-gray-400">{s.name}</span>
-              </div>
-              <span className="text-white">{s.size} ({s.value}%)</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Retention */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Rétention des sauvegardes</h3>
-          {[
-            { icon: '🔄', label: 'Sauvegardes automatiques', v: '30 jours' },
-            { icon: '📅', label: 'Sauvegardes planifiées', v: '30 jours' },
-            { icon: '✋', label: 'Sauvegardes manuelles', v: '90 jours' },
-          ].map(r => (
-            <div key={r.label} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs">{r.icon}</span>
-                <span className="text-xs text-gray-400">{r.label}</span>
-              </div>
-              <span className="text-xs text-white font-medium">{r.v}</span>
-            </div>
-          ))}
-          <button className="w-full mt-3 text-xs text-purple-400 hover:text-purple-300 transition-colors py-2 border border-purple-500/20 rounded-lg hover:bg-purple-500/5">
-            Gérer la rétention
-          </button>
-        </div>
-
-        {/* Help */}
-        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-white mb-2">Besoin d'aide ?</h3>
-          <p className="text-xs text-gray-400 mb-3">Consultez notre guide sur les sauvegardes ou contactez le support.</p>
-          <button className="w-full btn-secondary text-xs py-2 flex items-center justify-center gap-1 mb-2">
-            Voir le guide <ExternalLink className="w-3 h-3" />
-          </button>
-          <button className="w-full btn-primary text-xs py-2 flex items-center justify-center gap-1">
-            💬 Contacter le support
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );
