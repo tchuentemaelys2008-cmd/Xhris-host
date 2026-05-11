@@ -1,7 +1,29 @@
 import { Router, Response } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+
+const uploadDir = path.join(process.cwd(), 'uploads', 'community');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|zip|mp4|mp3|txt|doc|docx/i;
+    cb(null, allowed.test(path.extname(file.originalname)));
+  },
+});
 
 const router = Router();
 
@@ -151,6 +173,32 @@ router.get('/online', async (_req: AuthRequest, res: Response) => {
     sendSuccess(res, users);
   } catch (err) {
     sendError(res, 'Erreur', 500);
+  }
+});
+
+// POST /api/community/channels/:id/upload
+router.post('/channels/:id/upload', upload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return sendError(res, 'Aucun fichier reçu', 400);
+    const channel = await prisma.channel.findUnique({ where: { id: req.params.id } });
+    if (!channel) return sendError(res, 'Salon non trouvé', 404);
+
+    const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`;
+    const fileUrl = `${backendUrl}/uploads/community/${req.file.filename}`;
+    const attachment = JSON.stringify({ url: fileUrl, name: req.file.originalname, size: req.file.size, type: req.file.mimetype });
+
+    const message = await prisma.message.create({
+      data: {
+        channelId: req.params.id,
+        userId: req.user!.id,
+        content: req.file.originalname,
+        attachments: [attachment],
+      },
+      include: { user: { select: { id: true, name: true, avatar: true, role: true } } },
+    });
+    sendSuccess(res, message, 'Fichier envoyé', 201);
+  } catch (err) {
+    sendError(res, 'Erreur upload', 500);
   }
 });
 

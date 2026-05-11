@@ -220,4 +220,35 @@ router.get('/referral/leaderboard', async (_req: AuthRequest, res: Response) => 
   }
 });
 
+// GET /api/coins/recent-recipients
+router.get('/recent-recipients', async (req: AuthRequest, res: Response) => {
+  try {
+    const recentTransfers = await prisma.coinTransfer.findMany({
+      where: { senderId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 15,
+      include: {
+        receiver: { select: { id: true, name: true, avatar: true, plan: true } },
+      },
+    });
+
+    const seen = new Set<string>();
+    const recipients = recentTransfers
+      .filter(t => { if (seen.has(t.receiverId)) return false; seen.add(t.receiverId); return true; })
+      .slice(0, 5)
+      .map(t => ({
+        id: t.receiver.id,
+        name: t.receiver.name,
+        avatar: t.receiver.avatar,
+        plan: t.receiver.plan,
+        lastAmount: t.amount,
+        lastDate: t.createdAt,
+      }));
+
+    sendSuccess(res, recipients);
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
 export default router;

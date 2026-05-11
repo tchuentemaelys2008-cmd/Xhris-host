@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import {
   HelpCircle, Ticket, Megaphone, Search, BookOpen, ChevronRight,
   Rocket, Bot, Coins, Server, Shield, Cpu, Receipt, Code,
-  Eye, Plus, Send, Loader2, CheckCircle, Clock, AlertCircle, MessageSquare, X
+  Eye, Plus, Send, Loader2, CheckCircle, Clock, AlertCircle, MessageSquare, X, ChevronLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -44,6 +44,7 @@ export default function SupportPage() {
   const [showReply, setShowReply] = useState(false);
   const [replyTicket, setReplyTicket] = useState<any>(null);
   const [replyContent, setReplyContent] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [newTicket, setNewTicket] = useState({ subject: '', message: '', category: 'general', priority: 'MEDIUM' });
 
   const { data: articlesData } = useQuery({ queryKey: ['support-articles', search], queryFn: () => supportApi.getArticles({ search: search || undefined }) });
@@ -52,6 +53,17 @@ export default function SupportPage() {
     queryFn: () => supportApi.getTickets(),
   });
   const { data: faqData } = useQuery({ queryKey: ['faq'], queryFn: () => supportApi.getFaq() });
+  const { data: ticketDetailData, isLoading: ticketDetailLoading } = useQuery({
+    queryKey: ['ticket-detail', selectedTicket?.id],
+    queryFn: () => apiClient.get(`/support/tickets/${selectedTicket?.id}`),
+    enabled: !!selectedTicket?.id,
+  });
+  const ticketMessages: any[] = (() => {
+    const d = (ticketDetailData as any)?.data;
+    if (!d) return [];
+    const ticket = Array.isArray(d) ? null : d.data || d;
+    return ticket?.messages || selectedTicket?.messages || [];
+  })();
 
   const _rawArticles = (articlesData as any)?.data?.articles ?? (articlesData as any)?.data;
   const articles: any[] = Array.isArray(_rawArticles) ? _rawArticles : [];
@@ -261,20 +273,25 @@ export default function SupportPage() {
               <button onClick={() => setShowCreate(true)} className="btn-primary">Créer mon premier ticket</button>
             </div>
           ) : tickets.map((ticket: any) => (
-            <motion.div key={ticket.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="bg-[#111118] border border-white/5 rounded-xl p-5 hover:border-white/10 transition-colors">
+            <motion.div
+              key={ticket.id}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={() => setSelectedTicket(ticket)}
+              className="bg-[#111118] border border-white/5 hover:border-purple-500/30 rounded-xl p-5 cursor-pointer transition-all hover:bg-purple-500/5 group"
+            >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
                   <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                     {ticketStatusIcon(ticket.status)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">{ticket.subject}</div>
+                    <div className="text-sm font-medium text-white truncate group-hover:text-purple-300 transition-colors">{ticket.subject}</div>
                     <div className="text-xs text-gray-500 mt-0.5">#{ticket.id?.slice(0, 8)} · {formatRelative(ticket.createdAt)}</div>
-                    {ticket.messages?.[0] && (
-                      <div className="text-xs text-gray-400 mt-1 truncate">{ticket.messages[0].content}</div>
-                    )}
-                    {ticket.lastMessage && (
-                      <div className="text-xs text-gray-400 mt-1 truncate">{ticket.lastMessage}</div>
+                    {(ticket.messages?.[0]?.content || ticket.lastMessage) && (
+                      <div className="text-xs text-gray-400 mt-1 truncate">
+                        {ticket.messages?.[0]?.content || ticket.lastMessage}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -290,16 +307,11 @@ export default function SupportPage() {
                     'bg-orange-500/10 text-orange-400': ticket.priority === 'HIGH',
                     'bg-red-500/10 text-red-400': ticket.priority === 'URGENT',
                   })}>{TICKET_PRIORITY[ticket.priority as keyof typeof TICKET_PRIORITY] || ticket.priority}</span>
-                  {ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED' && (
-                    <button
-                      onClick={() => { setReplyTicket(ticket); setShowReply(true); }}
-                      className="flex items-center gap-1 text-xs px-2 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/20 transition-colors"
-                    >
-                      <MessageSquare className="w-3 h-3" />
-                      Répondre
-                    </button>
-                  )}
                 </div>
+              </div>
+              <div className="flex items-center gap-1 mt-2 text-xs text-gray-600 group-hover:text-purple-400 transition-colors">
+                <Eye className="w-3 h-3" />
+                <span>Cliquer pour lire et répondre</span>
               </div>
             </motion.div>
           ))}
@@ -398,6 +410,88 @@ export default function SupportPage() {
                 {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Envoyer</>}
               </button>
             </div>
+          </motion.div>
+        </div>
+      )}
+      {/* Ticket detail modal */}
+      {selectedTicket && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-[#0F0F1A] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 p-4 border-b border-white/10 flex-shrink-0">
+              <button onClick={() => setSelectedTicket(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-white truncate">{selectedTicket.subject}</h3>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className={cn('text-xs px-2 py-0.5 rounded-full', {
+                    'bg-blue-500/10 text-blue-400': selectedTicket.status === 'OPEN',
+                    'bg-yellow-500/10 text-yellow-400': selectedTicket.status === 'IN_PROGRESS' || selectedTicket.status === 'WAITING',
+                    'bg-green-500/10 text-green-400': selectedTicket.status === 'RESOLVED' || selectedTicket.status === 'CLOSED',
+                  })}>{TICKET_STATUS[selectedTicket.status as keyof typeof TICKET_STATUS] || selectedTicket.status}</span>
+                  <span className="text-xs text-gray-500">#{selectedTicket.id?.slice(0, 8)}</span>
+                  <span className="text-xs text-gray-600">{formatRelative(selectedTicket.createdAt)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {ticketDetailLoading ? (
+                <div className="text-center py-8"><Loader2 className="w-6 h-6 text-purple-400 animate-spin mx-auto" /></div>
+              ) : ticketMessages.length === 0 ? (
+                <div className="text-center text-gray-500 text-sm py-8">
+                  <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  Aucun message dans ce ticket
+                </div>
+              ) : ticketMessages.map((msg: any, i: number) => (
+                <div key={msg.id || i} className={cn('flex gap-3', msg.isAdmin ? '' : 'flex-row-reverse')}>
+                  <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0', msg.isAdmin ? 'bg-purple-600 text-white' : 'bg-gradient-to-br from-blue-500 to-purple-600 text-white')}>
+                    {msg.isAdmin ? 'A' : user?.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                  <div className={cn('max-w-[80%] flex flex-col', msg.isAdmin ? '' : 'items-end')}>
+                    <div className={cn('text-xs mb-1', msg.isAdmin ? 'text-purple-400' : 'text-gray-400')}>
+                      {msg.isAdmin ? 'Support XHRIS' : user?.name} · {msg.createdAt ? new Date(msg.createdAt).toLocaleString('fr-FR') : ''}
+                    </div>
+                    <div className={cn('rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap', msg.isAdmin ? 'bg-purple-500/10 border border-purple-500/20 text-gray-200 rounded-tl-none' : 'bg-white/5 border border-white/10 text-gray-200 rounded-tr-none')}>
+                      {msg.content}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Reply */}
+            {selectedTicket.status !== 'RESOLVED' && selectedTicket.status !== 'CLOSED' && (
+              <div className="border-t border-white/10 p-4 flex-shrink-0">
+                <textarea
+                  className="w-full bg-[#1A1A24] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/50 resize-none transition-colors"
+                  rows={3}
+                  placeholder="Votre réponse..."
+                  value={replyContent}
+                  onChange={e => setReplyContent(e.target.value)}
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={() => {
+                      if (!replyContent.trim()) return;
+                      setReplyTicket(selectedTicket);
+                      replyMutation.mutate();
+                    }}
+                    disabled={!replyContent.trim() || replyMutation.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium transition-colors"
+                  >
+                    {replyMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Répondre
+                  </button>
+                </div>
+              </div>
+            )}
           </motion.div>
         </div>
       )}

@@ -6,7 +6,7 @@ import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
   Send, Link2, Copy, Users, Coins, Loader2,
-  CheckCircle, ArrowLeft, AlertCircle, UserCheck, UserX,
+  CheckCircle, ArrowLeft, AlertCircle, UserCheck, UserX, Clock,
 } from 'lucide-react';
 import { coinsApi, apiClient } from '@/lib/api';
 import { copyToClipboard } from '@/lib/utils';
@@ -41,6 +41,20 @@ export default function CoinsSharePage() {
     queryFn:  () => coinsApi.getBalance(),
     enabled:  !!user,
   });
+
+  // ── Destinataires récents ────────────────────────────────────────
+  const { data: recentData } = useQuery({
+    queryKey: ['recent-recipients'],
+    queryFn:  () => apiClient.get('/coins/recent-recipients'),
+    enabled:  !!user,
+  });
+  const recentRecipients: any[] = (() => {
+    const d = (recentData as any)?.data;
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (Array.isArray(d.data)) return d.data;
+    return [];
+  })();
 
   // ── Referral ─────────────────────────────────────────────────────
   const { data: referralData } = useQuery({
@@ -191,6 +205,33 @@ export default function CoinsSharePage() {
             </motion.div>
           ) : (
             <div className="space-y-3">
+
+              {/* ── Destinataires récents ── */}
+              {recentRecipients.length > 0 && lookupState === 'idle' && !transferId && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Clock className="w-3.5 h-3.5 text-gray-500" />
+                    <span className="text-xs text-gray-500">Envois récents</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {recentRecipients.map((r: any) => (
+                      <button
+                        key={r.id}
+                        onClick={() => setTransferId(r.id)}
+                        className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 hover:bg-purple-500/10 hover:border-purple-500/20 transition-all group"
+                      >
+                        <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                          {r.name?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <div className="text-left">
+                          <div className="text-xs text-white font-medium group-hover:text-purple-300 transition-colors">{r.name}</div>
+                          <div className="text-xs text-gray-600">{r.lastAmount} coins</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* ── ID destinataire + lookup ── */}
               <div>
