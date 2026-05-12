@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { userApi } from '@/lib/api';
+import { useCoinsBalance } from '@/lib/useCoinsBalance';
 import { formatDate, formatRelative, copyToClipboard, cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -49,6 +50,7 @@ export default function ProfilePage() {
   const { data: statsData } = useQuery({ queryKey: ['user-stats'], queryFn: () => userApi.getDashboardStats() });
   const { data: sessionsData } = useQuery({ queryKey: ['sessions'], queryFn: () => userApi.getSessions(), enabled: tab === 'sessions' });
 
+  const { balance: coinsBalance } = useCoinsBalance();
   const profile = (profileData as any)?.data || {};
   const stats = (statsData as any)?.data || {};
   const _raw = (sessionsData as any)?.data?.sessions ?? (sessionsData as any)?.data;
@@ -145,7 +147,7 @@ export default function ProfilePage() {
         {[
           { icon: Bot,       label: 'Bots',     value: stats?.activeBots   ?? 0, color: 'text-blue-400' },
           { icon: Server,    label: 'Serveurs', value: stats?.activeServers ?? 0, color: 'text-purple-400' },
-          { icon: Coins,     label: 'Coins',    value: stats?.coins ?? user?.coins ?? 0, color: 'text-amber-400' },
+          { icon: Coins,     label: 'Coins',    value: coinsBalance, color: 'text-amber-400' },
           { icon: TrendingUp,label: 'Dépensé',  value: stats?.totalEarned  ?? 0, color: 'text-green-400' },
           { icon: Award,     label: 'Badge',    value: user?.plan || 'Free', color: 'text-orange-400' },
         ].map(s => (

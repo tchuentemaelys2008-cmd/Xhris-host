@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
@@ -9,6 +9,7 @@ import {
   Loader2, Shield, Zap, Star, ChevronDown, Globe,
 } from 'lucide-react';
 import { coinsApi, paymentsApi } from '@/lib/api';
+import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import { COIN_PACKS } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -53,12 +54,8 @@ export default function BuyCoinsPage() {
   const [currency, setCurrency] = useState(CURRENCIES[0]); // FCFA by default
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
 
-  const { data: balanceData } = useQuery({
-    queryKey: ['coins-balance'],
-    queryFn: () => coinsApi.getBalance(),
-    enabled: !!user,
-  });
-  const balance = (balanceData as any)?.data?.coins ?? user?.coins ?? 0;
+  const { balance } = useCoinsBalance();
+  const invalidateBalance = useInvalidateBalance();
 
   const orderMutation = useMutation({
     mutationFn: () => paymentsApi.createOrder({
@@ -68,7 +65,7 @@ export default function BuyCoinsPage() {
       amount: selectedPack.price,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
+      invalidateBalance();
       setStep('success');
       toast.success(`+${selectedPack.coins} Coins ajoutés !`);
     },

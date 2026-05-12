@@ -9,6 +9,7 @@ import {
   Cpu, HardDrive, CheckCircle, XCircle, Loader2, Coins,
 } from 'lucide-react';
 import { serversApi } from '@/lib/api';
+import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { formatUptime, getStatusDot, getStatusLabel, cn } from '@/lib/utils';
@@ -37,23 +38,14 @@ export default function ServersPage() {
 
   const PLAN_COSTS: Record<string, number> = { STARTER: 10, PRO: 20, ADVANCED: 40, ELITE: 80 };
 
-  const { data: balanceData } = useQuery({
-    queryKey: ['coins-balance'],
-    queryFn: () => serversApi.getAll().then(() => import('@/lib/api').then(m => m.coinsApi.getBalance())),
-    enabled: false,
-  });
-  const { data: coinData } = useQuery({
-    queryKey: ['coins-balance'],
-    queryFn: () => import('@/lib/api').then(m => m.coinsApi.getBalance()),
-    enabled: !!token,
-  });
-  const balance: number = (coinData as any)?.data?.coins ?? (session?.user as any)?.coins ?? 0;
+  const { balance } = useCoinsBalance();
+  const invalidateBalance = useInvalidateBalance();
 
   const createMutation = useMutation({
     mutationFn: () => serversApi.create({ name: newName, plan: newPlan }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['servers'] });
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
+      invalidateBalance();
       setShowCreate(false);
       setNewName('');
       toast.success(`Serveur créé ! ${PLAN_COSTS[newPlan]} Coins débités.`);

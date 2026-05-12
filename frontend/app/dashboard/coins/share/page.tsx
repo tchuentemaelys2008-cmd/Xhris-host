@@ -9,6 +9,7 @@ import {
   CheckCircle, ArrowLeft, AlertCircle, UserCheck, UserX, Clock,
 } from 'lucide-react';
 import { coinsApi, apiClient } from '@/lib/api';
+import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import { copyToClipboard } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -36,13 +37,8 @@ export default function CoinsSharePage() {
   const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Balance ──────────────────────────────────────────────────────
-  const { data: balanceData } = useQuery({
-    queryKey: ['coins-balance'],
-    queryFn:  () => coinsApi.getBalance(),
-    enabled:  !!user,
-    staleTime: 0,
-    refetchInterval: 15000,
-  });
+  const { balance } = useCoinsBalance();
+  const invalidateBalance = useInvalidateBalance();
 
   // ── Destinataires récents ────────────────────────────────────────
   const { data: recentData } = useQuery({
@@ -65,8 +61,6 @@ export default function CoinsSharePage() {
     enabled:  !!user,
   });
 
-  // Never fallback to session.user.coins (stale after login)
-  const balance       = (balanceData as any)?.data?.coins ?? 0;
   const _rawReferral  = (referralData as any)?.data ?? {};
   const referral      = _rawReferral && !Array.isArray(_rawReferral) ? _rawReferral : {};
 
@@ -126,7 +120,7 @@ export default function CoinsSharePage() {
     mutationFn: () => coinsApi.transfer(transferId.trim(), amountNum),
     onSuccess: () => {
       // Force immediate refetch so balance updates right away
-      qc.refetchQueries({ queryKey: ['coins-balance'], type: 'all' });
+      invalidateBalance();
       qc.invalidateQueries({ queryKey: ['coins-transactions'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });

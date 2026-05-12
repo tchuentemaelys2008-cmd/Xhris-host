@@ -9,6 +9,7 @@ import {
   Clock, Loader2, Share2, Trophy, UserCheck, UserX,
 } from 'lucide-react';
 import { coinsApi, apiClient } from '@/lib/api';
+import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import { formatDateTime, cn, copyToClipboard } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -47,11 +48,8 @@ export default function CoinsPage() {
   const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Queries ──────────────────────────────────────────────────────
-  const { data: balanceData } = useQuery({
-    queryKey: ['coins-balance'],
-    queryFn:  () => coinsApi.getBalance(),
-    enabled:  !!user,
-  });
+  const { balance } = useCoinsBalance();
+  const invalidateBalance = useInvalidateBalance();
   const { data: txData, isLoading: txLoading } = useQuery({
     queryKey: ['coins-transactions', txTab],
     queryFn:  () => coinsApi.getTransactions({ type: txTab === 'Tous' ? undefined : txTab.toUpperCase() }),
@@ -66,7 +64,6 @@ export default function CoinsPage() {
     queryFn:  () => coinsApi.getReferralLeaderboard(),
   });
 
-  const balance = (balanceData as any)?.data?.coins ?? user?.coins ?? 0;
   const _raw_transactions = (txData as any)?.data?.transactions ?? (txData as any)?.data ?? [];
   const transactions: any[] = Array.isArray(_raw_transactions) ? _raw_transactions : [];
   const _rawReferral  = (referralData as any)?.data ?? {};
@@ -119,7 +116,7 @@ export default function CoinsPage() {
   const transferMutation = useMutation({
     mutationFn: () => coinsApi.transfer(transferId.trim(), amountNum),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
+      invalidateBalance();
       qc.invalidateQueries({ queryKey: ['coins-transactions'] });
       setTransferId('');
       setTransferAmount('');
@@ -134,8 +131,8 @@ export default function CoinsPage() {
     mutationFn: () => coinsApi.claimDailyBonus(),
     onSuccess: () => {
       setDailyClaimed(true);
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
-      toast.success('+5 Coins bonus quotidien !');
+      invalidateBalance();
+      toast.success('+3 Coins bonus quotidien !');
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || e.message),
   });
@@ -143,7 +140,7 @@ export default function CoinsPage() {
   const bonusMutation = useMutation({
     mutationFn: () => coinsApi.applyBonusCode(bonusCode),
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
+      invalidateBalance();
       setBonusCode('');
       toast.success(`+${data?.data?.data?.coins ?? data?.data?.coins ?? '?'} Coins ajoutés !`);
     },
