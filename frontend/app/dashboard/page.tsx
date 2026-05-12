@@ -84,7 +84,7 @@ export default function DashboardPage() {
   });
 
   const stats = (statsData as any)?.data || {};
-  const balance = (balanceData as any)?.data?.coins ?? user?.coins ?? 0;
+  const balance = (balanceData as any)?.data?.data?.coins ?? user?.coins ?? 0;
   const transactions: any[] = (txData as any)?.data?.transactions || [];
   const referral = (referralData as any)?.data || {};
   const usageData: any[] = stats.usageChart || [];

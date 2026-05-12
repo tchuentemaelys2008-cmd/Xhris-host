@@ -20,7 +20,7 @@ export function useCoinsBalance() {
     refetchInterval: 20000, // auto-refresh every 20s
   });
 
-  const balance: number = (data as any)?.data?.coins ?? 0;
+  const balance: number = (data as any)?.data?.data?.coins ?? 0;
 
   return { balance, isLoading, refetch };
 }

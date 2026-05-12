@@ -116,8 +116,8 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
   });
 
   // Toujours lire depuis l'API, jamais depuis session.user.coins (stale après login)
-  const balance          = (balanceData as any)?.data?.coins      ?? 0;
-  const coinsEarnedToday = (balanceData as any)?.data?.earnedToday ?? 0;
+  const balance          = (balanceData as any)?.data?.data?.coins      ?? 0;
+  const coinsEarnedToday = (balanceData as any)?.data?.data?.earnedToday ?? 0;
 
   // ── FIX : garantir que notifications est toujours un tableau ──
   const rawNotifs =
