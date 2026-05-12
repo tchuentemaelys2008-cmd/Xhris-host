@@ -376,7 +376,7 @@ paymentsRouter.post('/geniuspay/initiate', async (req: AuthRequest, res: Respons
           amount,
           currency,
           description: description || `XHRIS Host - ${coins} Coins (${packId})`,
-          customer: { name: req.user!.name, email: req.user!.email },
+          customer: { email: req.user!.email },
           metadata: { order_id: reference, pack_id: packId, coins, user_id: req.user!.id },
           success_url: successUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?success=1&ref=${reference}`,
           error_url: errorUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?error=1&ref=${reference}`,
