@@ -6,8 +6,8 @@ import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
   Settings, Globe, Bell, Shield, Moon, Sun, Save,
-  Loader2, Trash2, LogOut, ChevronRight, Toggle,
-  Volume2, Mail, Smartphone, Eye, EyeOff, CheckCircle,
+  Loader2, Trash2, LogOut, ChevronRight,
+  Mail, Smartphone, Eye, EyeOff, CheckCircle,
 } from 'lucide-react';
 import { userApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -86,16 +86,23 @@ export default function SettingsPage() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['profile'] });
-      // Persist to localStorage for immediate use
+      // Apply immediately to DOM + localStorage
       if (typeof window !== 'undefined') {
         localStorage.setItem('xhris_language', settings.language);
         localStorage.setItem('xhris_currency', settings.currency);
+        localStorage.setItem('xhris_theme', settings.theme);
+        localStorage.setItem('xhris_timezone', settings.timezone);
+        document.documentElement.lang = settings.language;
+        document.documentElement.setAttribute('data-theme', settings.theme);
       }
       setSaved(true);
-      toast.success('Paramètres enregistrés ! Rechargement en cours...', { duration: 5000 });
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      setTimeout(() => setSaved(false), 3000);
+      toast.success(
+        settings.language === 'en'
+          ? 'Settings saved! The site is now in English.'
+          : 'Paramètres enregistrés ! Le site est maintenant configuré.',
+        { duration: 5000 }
+      );
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la sauvegarde'),
   });
@@ -140,6 +147,39 @@ export default function SettingsPage() {
       {/* General */}
       {tab === 'general' && (
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+
+          {/* Username change */}
+          <div className="bg-[#111118] border border-white/5 rounded-xl p-5 space-y-3">
+            <h3 className="font-semibold text-white text-sm">Changer de pseudo</h3>
+            <div className="flex gap-2">
+              <input
+                className="input-field flex-1"
+                placeholder={user?.name || 'Nouveau pseudo'}
+                value={settings.language === 'fr' ? (settings as any).newName || '' : (settings as any).newName || ''}
+                onChange={e => setSettings(s => ({ ...s, newName: e.target.value } as any))}
+              />
+              <button
+                onClick={async () => {
+                  const newName = (settings as any).newName?.trim();
+                  if (!newName) return toast.error('Entrez un pseudo');
+                  try {
+                    const { userApi } = await import('@/lib/api');
+                    await userApi.updateProfile({ name: newName });
+                    toast.success(`Pseudo changé en "${newName}" !`, { duration: 5000 });
+                    setSettings(s => ({ ...s, newName: '' } as any));
+                    qc.invalidateQueries({ queryKey: ['profile'] });
+                  } catch (e: any) {
+                    toast.error(e?.response?.data?.message || 'Erreur');
+                  }
+                }}
+                className="btn-primary flex items-center gap-2 flex-shrink-0"
+              >
+                <Save className="w-4 h-4" />
+                <span className="hidden sm:inline">Sauvegarder</span>
+              </button>
+            </div>
+          </div>
+
           <div className="bg-[#111118] border border-white/5 rounded-xl p-6 space-y-5">
             <h3 className="font-semibold text-white">Langue & Région</h3>
 

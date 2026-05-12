@@ -122,12 +122,14 @@ export default function CoinsSharePage() {
   const transferMutation = useMutation({
     mutationFn: () => coinsApi.transfer(transferId.trim(), amountNum),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['coins-balance'] });
-      qc.refetchQueries({ queryKey: ['coins-balance'] });
+      // Force immediate refetch so balance updates right away
+      qc.refetchQueries({ queryKey: ['coins-balance'], type: 'all' });
       qc.invalidateQueries({ queryKey: ['coins-transactions'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      qc.invalidateQueries({ queryKey: ['recent-recipients'] });
       const recipientName = recipient?.name || 'l\'utilisateur';
-      toast.success(`${amountNum} Coins envoyés à ${recipientName} avec succès !`, { duration: 5000 });
+      toast.success(`✓ ${amountNum} Coins envoyés à ${recipientName} avec succès !`, { duration: 10000 });
       setTransferId('');
       setTransferAmount('');
       setNote('');
