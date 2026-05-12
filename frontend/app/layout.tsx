@@ -4,6 +4,7 @@ import { GeistMono } from 'geist/font/mono';
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { Providers } from '@/components/providers';
+import FooterWrapper from '@/components/FooterWrapper';
 import { Toaster } from 'react-hot-toast';
 import '../styles/globals.css';
 
@@ -27,13 +28,13 @@ export const metadata: Metadata = {
     title: 'XHRIS Host — Hébergement Bot WhatsApp & Serveurs Cloud',
     description: 'Déployez vos bots WhatsApp et gérez vos serveurs cloud en quelques clics. 10 coins offerts à l\'inscription.',
     siteName: 'XHRIS Host',
-    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'XHRIS Host Platform' }],
+    images: [{ url: 'https://xhris.host/opengraph-image.png', width: 1200, height: 630, alt: 'XHRIS Host Platform' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'XHRIS Host — Bot WhatsApp & Cloud',
     description: 'Déployez vos bots WhatsApp et serveurs cloud. Plateforme SaaS tout-en-un.',
-    images: ['/og-image.png'],
+    images: ['https://xhris.host/opengraph-image.png'],
   },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   manifest: '/manifest.json',
@@ -62,6 +63,7 @@ export default async function RootLayout({ children, params: { locale } }: RootL
         <NextIntlClientProvider messages={messages}>
           <Providers>
             {children}
+            <FooterWrapper />
             <Toaster
               position="top-right"
               toastOptions={{
