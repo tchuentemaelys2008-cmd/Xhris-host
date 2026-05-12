@@ -15,6 +15,7 @@ import {
 import { signOut } from 'next-auth/react';
 import { coinsApi, notificationsApi, userApi } from '@/lib/api';
 import { SettingsProvider, useSettings } from '@/lib/settingsContext';
+import Footer from '@/components/Footer';
 
 // ─── SVG Coin Icon ───────────────────────────────────────────────
 function CoinIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -438,6 +439,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             {children}
           </motion.div>
         </main>
+        <Footer />
       </div>
     </div>
   );

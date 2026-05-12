@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
-  Bot, Server, Coins, BarChart3, Shield, Zap,
+  Bot, Server, Coins, BarChart3, Shield, Zap, Globe,
   ArrowRight, Star, CheckCircle,
   ChevronRight, Sparkles, Play
 } from 'lucide-react';
