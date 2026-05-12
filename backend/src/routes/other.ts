@@ -292,7 +292,6 @@ paymentsRouter.post('/initiate', async (req: AuthRequest, res: Response) => {
 
     const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    // In production: integrate Fapshi/GenuisPay/MiniPay APIs
     const payment = await prisma.payment.create({
       data: {
         userId: req.user!.id,
@@ -306,6 +305,49 @@ paymentsRouter.post('/initiate', async (req: AuthRequest, res: Response) => {
 
     sendSuccess(res, { payment, reference, paymentUrl: `https://pay.xhris.host/checkout/${reference}` }, 'Paiement initié');
   } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// POST /api/payments/fapshi/initiate — Fapshi automatic payment
+paymentsRouter.post('/fapshi/initiate', async (req: AuthRequest, res: Response) => {
+  try {
+    const { packId, coins, amount, phone } = req.body;
+    if (!packId || !coins || !amount || !phone) return sendError(res, 'Paramètres manquants', 400);
+
+    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+    const amountXAF = Math.round(amount * 655);
+    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    // Create pending payment in DB
+    await prisma.payment.create({
+      data: { userId: req.user!.id, amount, method: 'FAPSHI' as any, reference, packId, status: 'PENDING' },
+    });
+
+    // Call Fapshi API if credentials available
+    if (FAPSHI_API_KEY && FAPSHI_API_USER) {
+      const fapshiRes = await fetch('https://live.fapshi.com/initiate-pay', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apiuser': FAPSHI_API_USER,
+          'apikey': FAPSHI_API_KEY,
+        },
+        body: JSON.stringify({
+          amount: amountXAF,
+          phone: phone.replace(/\s/g, '').replace(/^\+/, ''),
+          message: `XHRIS Host - ${coins} Coins (${packId})`,
+          externalId: reference,
+          redirectUrl: `${process.env.FRONTEND_URL || 'https://xhris-host-frontend.vercel.app'}/dashboard/coins/buy?success=1`,
+        }),
+      });
+      const fapshiData: any = await fapshiRes.json();
+      if (!fapshiRes.ok) return sendError(res, fapshiData?.message || 'Erreur Fapshi', 400);
+      sendSuccess(res, { reference, link: fapshiData?.link }, 'Paiement Fapshi initié');
+    } else {
+      // No API key — return a placeholder response
+      sendSuccess(res, { reference, link: null }, 'Paiement en attente de configuration Fapshi');
+    }
+  } catch (err) { sendError(res, 'Erreur lors de l\'initiation Fapshi', 500); }
 });
 
 paymentsRouter.get('/verify/:reference', async (req: AuthRequest, res: Response) => {

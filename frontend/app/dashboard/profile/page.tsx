@@ -391,11 +391,7 @@ export default function ProfilePage() {
             <Share2 className="w-4 h-4 text-green-400" />
             <span className="text-sm font-semibold text-white">Lien de parrainage</span>
           </div>
-          {!profile?.emailVerified && !profile?.googleId ? (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-400">
-              Vérifiez votre email pour activer le parrainage. Les coins ne sont crédités qu'après vérification.
-            </div>
-          ) : referralLink ? (
+          {referralLink ? (
             <>
               <p className="text-xs text-gray-400 mb-2">
                 Partagez ce lien · <span className="text-green-400 font-medium">{referral.totalReferrals || 0} filleuls</span> · <span className="text-amber-400">{referral.totalEarned || 0} Coins gagnés</span>
@@ -404,6 +400,9 @@ export default function ProfilePage() {
                 <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-2.5 py-2 text-xs text-green-400 truncate">{referralLink}</div>
                 <button className="btn-secondary px-2.5" onClick={() => copyToClipboard(referralLink).then(() => toast.success('Copié !'))}><Copy className="w-3.5 h-3.5" /></button>
               </div>
+              {profile && !profile.emailVerified && !profile.googleId && (
+                <p className="text-[10px] text-amber-400 mt-1">Vérifiez votre email pour que vos filleuls vous rapportent des Coins.</p>
+              )}
             </>
           ) : (
             <div className="text-xs text-gray-500">Chargement...</div>

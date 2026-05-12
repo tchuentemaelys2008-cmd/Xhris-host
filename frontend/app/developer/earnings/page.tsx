@@ -150,11 +150,12 @@ export default function DeveloperPage() {
         <p className="text-gray-400 text-sm mt-1">Soumettez votre premier bot pour débloquer l&apos;espace développeur et commencer à gagner des Coins.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-2">
         {[
           { icon: Upload, label: '1. Soumettez votre bot', desc: 'Remplissez le formulaire ci-dessous avec les infos de votre bot.', color: 'text-purple-400', bg: 'bg-purple-500/10' },
           { icon: CheckCircle, label: '2. Validation admin', desc: 'Notre équipe vérifie votre bot sous 24-48h.', color: 'text-blue-400', bg: 'bg-blue-500/10' },
           { icon: Zap, label: '3. Accès développeur', desc: 'Débloquez les stats, revenus et outils développeur.', color: 'text-green-400', bg: 'bg-green-500/10' },
+          { icon: Gift, label: '4. Gagnez des Coins', desc: '+2 Coins crédités sur votre compte à chaque déploiement de votre bot par un utilisateur.', color: 'text-amber-400', bg: 'bg-amber-500/10' },
         ].map(step => (
           <div key={step.label} className="bg-[#111118] border border-white/5 rounded-xl p-4">
             <div className={`w-9 h-9 ${step.bg} rounded-lg flex items-center justify-center mb-3`}>

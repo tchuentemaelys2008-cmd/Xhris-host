@@ -64,11 +64,13 @@ export default function CoinsPage() {
     queryFn:  () => coinsApi.getReferralLeaderboard(),
   });
 
-  const _raw_transactions = (txData as any)?.data?.transactions ?? (txData as any)?.data ?? [];
-  const transactions: any[] = Array.isArray(_raw_transactions) ? _raw_transactions : [];
-  const _rawReferral  = (referralData as any)?.data ?? {};
+  // sendPaginated: { success, data:[...], pagination } — correct path is .data.data
+  const _txRaw = (txData as any)?.data;
+  const _raw_transactions = Array.isArray(_txRaw?.data) ? _txRaw.data : Array.isArray(_txRaw) ? _txRaw : [];
+  const transactions: any[] = _raw_transactions;
+  const _rawReferral  = (referralData as any)?.data?.data ?? {};
   const referral      = _rawReferral && !Array.isArray(_rawReferral) ? _rawReferral : {};
-  const _raw_leaderboard = (leaderboardData as any)?.data ?? [];
+  const _raw_leaderboard = (leaderboardData as any)?.data?.data ?? (leaderboardData as any)?.data ?? [];
   const leaderboard: any[] = Array.isArray(_raw_leaderboard) ? _raw_leaderboard : [];
 
   // ── Countdown bonus quotidien ────────────────────────────────────
