@@ -17,29 +17,19 @@ export default withAuth(
   },
   {
     callbacks: {
-      authorized: ({ token, req }) => {
-        const { pathname } = req.nextUrl;
-        if (
-          pathname === '/' ||
-          pathname.startsWith('/auth') ||
-          pathname.startsWith('/api') ||
-          pathname.startsWith('/_next') ||
-          pathname.startsWith('/favicon') ||
-          pathname.startsWith('/docs') ||
-          pathname.startsWith('/terms') ||
-          pathname.startsWith('/privacy') ||
-          pathname.startsWith('/contact') ||
-          pathname.startsWith('/community') ||
-          pathname.startsWith('/request-coins')
-        ) {
-          return true;
-        }
-        return !!token;
-      },
+      authorized: ({ token }) => !!token,
     },
   }
 );
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.png|.*\\.jpg|.*\\.svg).*)'],
+  // Middleware tourne UNIQUEMENT sur les routes protégées
+  matcher: [
+    '/dashboard/:path*',
+    '/admin/:path*',
+    '/developer/:path*',
+    '/marketplace/:path*',
+    '/community/:path*',
+    '/request-coins/:path*',
+  ],
 };
