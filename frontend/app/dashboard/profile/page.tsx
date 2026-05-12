@@ -14,19 +14,21 @@ import { useCoinsBalance } from '@/lib/useCoinsBalance';
 import { Share2, Link2 } from 'lucide-react';
 import { formatDate, formatRelative, copyToClipboard, cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-
-const TABS = [
-  { id: 'info',     label: 'Infos',        icon: User },
-  { id: 'security', label: 'Sécurité',     icon: Shield },
-  { id: 'prefs',    label: 'Préfs',        icon: Settings },
-  { id: 'sessions', label: 'Sessions',     icon: Monitor },
-];
+import { useSettings } from '@/lib/settingsContext';
 
 export default function ProfilePage() {
   const { data: session } = useSession();
+  const { t } = useSettings();
   const qc = useQueryClient();
   const user = session?.user as any;
   const [tab, setTab] = useState('info');
+  const TABS = [
+    { id: 'info',     label: t('profile.tab_info', 'Infos'),        icon: User },
+    { id: 'security', label: t('profile.tab_security', 'Sécurité'), icon: Shield },
+    { id: 'prefs',    label: t('profile.tab_prefs', 'Préfs'),       icon: Settings },
+    { id: 'sessions', label: t('profile.tab_sessions', 'Sessions'), icon: Monitor },
+  ];
+
   const [showOldPwd, setShowOldPwd] = useState(false);
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [form, setForm] = useState({ name: '', bio: '', whatsapp: '', location: '', language: 'fr', timezone: 'UTC', currency: 'EUR', theme: 'dark' });
@@ -63,13 +65,13 @@ export default function ProfilePage() {
 
   const updateMutation = useMutation({
     mutationFn: () => userApi.updateProfile(form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); toast.success('Profil mis à jour !'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profile'] }); toast.success(t('profile.updated', 'Profil mis à jour !')); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
   });
 
   const pwdMutation = useMutation({
     mutationFn: () => userApi.updatePassword(pwdForm.oldPassword, pwdForm.newPassword),
-    onSuccess: () => { setPwdForm({ oldPassword: '', newPassword: '' }); toast.success('Mot de passe mis à jour !'); },
+    onSuccess: () => { setPwdForm({ oldPassword: '', newPassword: '' }); toast.success(t('profile.pwd_updated', 'Mot de passe mis à jour !')); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
   });
 
@@ -91,8 +93,8 @@ export default function ProfilePage() {
   return (
     <div className="space-y-4 w-full max-w-full overflow-x-hidden">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-white">Mon Profil</h1>
-        <p className="text-gray-400 text-xs sm:text-sm mt-0.5">Gérez vos informations personnelles.</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">{t('profile.title', 'Mon Profil')}</h1>
+        <p className="text-gray-400 text-xs sm:text-sm mt-0.5">{t('profile.subtitle', 'Gérez vos informations personnelles.')}</p>
       </div>
 
       {/* Profile card */}
@@ -112,12 +114,12 @@ export default function ProfilePage() {
               {(user?.role === 'ADMIN' || user?.role === 'SUPERADMIN') && (
                 <Link href="/admin" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 text-xs hover:bg-yellow-500/20 transition-colors">
                   <LayoutDashboard className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Admin</span>
+                  <span className="hidden sm:inline">{t('profile.admin', 'Admin')}</span>
                 </Link>
               )}
               <Link href="/dashboard/settings" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-gray-400 text-xs hover:bg-white/10 transition-colors">
                 <Settings className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Paramètres</span>
+                <span className="hidden sm:inline">{t('profile.settings', 'Paramètres')}</span>
               </Link>
             </div>
           </div>
@@ -129,7 +131,7 @@ export default function ProfilePage() {
             )}
             <div className="flex items-center gap-1 text-green-400 text-xs">
               <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-              En ligne
+              {t('profile.online', 'En ligne')}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -150,11 +152,11 @@ export default function ProfilePage() {
       {/* Stats — compact on mobile */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 w-full">
         {[
-          { icon: Bot,       label: 'Bots',     value: stats?.activeBots   ?? 0, color: 'text-blue-400' },
-          { icon: Server,    label: 'Serveurs', value: stats?.activeServers ?? 0, color: 'text-purple-400' },
-          { icon: Coins,     label: 'Coins',    value: coinsBalance, color: 'text-amber-400' },
-          { icon: TrendingUp,label: 'Dépensé',  value: stats?.totalEarned  ?? 0, color: 'text-green-400' },
-          { icon: Award,     label: 'Badge',    value: user?.plan || 'Free', color: 'text-orange-400' },
+          { icon: Bot,       label: t('profile.bots', 'Bots'),         value: stats?.activeBots   ?? 0, color: 'text-blue-400' },
+          { icon: Server,    label: t('profile.servers', 'Serveurs'), value: stats?.activeServers ?? 0, color: 'text-purple-400' },
+          { icon: Coins,     label: t('common.coins', 'Coins'),       value: coinsBalance, color: 'text-amber-400' },
+          { icon: TrendingUp,label: t('profile.spent', 'Dépensé'),    value: stats?.totalEarned  ?? 0, color: 'text-green-400' },
+          { icon: Award,     label: t('profile.badge', 'Badge'),      value: user?.plan || 'Free', color: 'text-orange-400' },
         ].map(s => (
           <div key={s.label} className="bg-[#111118] border border-white/5 rounded-xl p-3">
             <s.icon className={`w-4 h-4 ${s.color} mb-1.5`} />
@@ -185,14 +187,14 @@ export default function ProfilePage() {
       {tab === 'info' && (
         <div className="space-y-4 w-full">
           <div className="bg-[#111118] border border-white/5 rounded-xl p-4 sm:p-5 w-full">
-            <h3 className="text-sm font-semibold text-white mb-4">Informations personnelles</h3>
+            <h3 className="text-sm font-semibold text-white mb-4">{t('profile.personal_info', 'Informations personnelles')}</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Nom d'utilisateur</label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.username', 'Nom d\'utilisateur')}</label>
                 <input className="input-field w-full" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Adresse e-mail</label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.email', 'Adresse e-mail')}</label>
                 <div className="relative w-full">
                   <input className="input-field w-full pr-16" value={profile?.email || user?.email || ''} readOnly />
                   {profile?.emailVerified && (
@@ -203,22 +205,22 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">WhatsApp (optionnel)</label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.whatsapp', 'WhatsApp (optionnel)')}</label>
                 <input className="input-field w-full" placeholder="+237 6XX XXX XXX" value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))} />
               </div>
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Localisation</label>
-                <input className="input-field w-full" placeholder="Pays / Ville" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.location', 'Localisation')}</label>
+                <input className="input-field w-full" placeholder={t('profile.location_ph', 'Pays / Ville')} value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
               </div>
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Langue</label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.language', 'Langue')}</label>
                 <select className="input-field w-full" value={form.language} onChange={e => setForm(f => ({ ...f, language: e.target.value }))}>
                   <option value="fr">Français</option>
                   <option value="en">English</option>
                 </select>
               </div>
               <div className="w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Fuseau horaire</label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.timezone', 'Fuseau horaire')}</label>
                 <select className="input-field w-full" value={form.timezone} onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))}>
                   <option value="UTC">UTC</option>
                   <option value="Europe/Paris">Europe/Paris</option>
@@ -227,14 +229,14 @@ export default function ProfilePage() {
                 </select>
               </div>
               <div className="sm:col-span-2 w-full">
-                <label className="text-xs text-gray-400 mb-1.5 block">Bio <span className="text-gray-600">{form.bio.length}/160</span></label>
+                <label className="text-xs text-gray-400 mb-1.5 block">{t('profile.bio', 'Bio')} <span className="text-gray-600">{form.bio.length}/160</span></label>
                 <textarea
                   className="input-field w-full resize-none"
                   rows={2}
                   maxLength={160}
                   value={form.bio}
                   onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}
-                  placeholder="Décrivez-vous en quelques mots..."
+                  placeholder={t('profile.bio_ph', 'Décrivez-vous en quelques mots...')}
                 />
               </div>
             </div>
@@ -244,20 +246,20 @@ export default function ProfilePage() {
               className="btn-primary mt-4 w-full sm:w-auto flex items-center justify-center gap-2"
             >
               {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Enregistrer
+              {t('profile.save', 'Enregistrer')}
             </button>
           </div>
 
           {/* XP card */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-4 w-full">
-            <h4 className="text-xs font-semibold text-white mb-3">Niveau & Progression</h4>
+            <h4 className="text-xs font-semibold text-white mb-3">{t('profile.level', 'Niveau & Progression')}</h4>
             <div className="flex items-center gap-3 mb-3">
               <div className="w-9 h-9 bg-purple-500/20 rounded-xl flex items-center justify-center">
                 <Award className="w-4 h-4 text-purple-400" />
               </div>
               <div>
                 <div className="text-sm font-medium text-white">{user?.plan || 'Gratuit'}</div>
-                <div className="text-xs text-gray-400">Niveau {profile?.level || 1}</div>
+                <div className="text-xs text-gray-400">{t('profile.lvl', 'Niveau')} {profile?.level || 1}</div>
               </div>
               <div className="ml-auto text-xs text-gray-500">{profile?.xp || 0} XP</div>
             </div>
@@ -272,11 +274,11 @@ export default function ProfilePage() {
       {tab === 'security' && (
         <div className="space-y-4 w-full">
           <div className="bg-[#111118] border border-white/5 rounded-xl p-4 sm:p-5 w-full">
-            <h3 className="text-sm font-semibold text-white mb-4">Changer le mot de passe</h3>
+            <h3 className="text-sm font-semibold text-white mb-4">{t('profile.change_pwd', 'Changer le mot de passe')}</h3>
             <div className="space-y-3">
               {[
-                { key: 'oldPassword', label: 'Ancien mot de passe', show: showOldPwd, toggle: () => setShowOldPwd(!showOldPwd) },
-                { key: 'newPassword', label: 'Nouveau mot de passe', show: showNewPwd, toggle: () => setShowNewPwd(!showNewPwd) },
+                { key: 'oldPassword', label: t('profile.old_pwd', 'Ancien mot de passe'), show: showOldPwd, toggle: () => setShowOldPwd(!showOldPwd) },
+                { key: 'newPassword', label: t('profile.new_pwd', 'Nouveau mot de passe'), show: showNewPwd, toggle: () => setShowNewPwd(!showNewPwd) },
               ].map(({ key, label, show, toggle }) => (
                 <div key={key} className="w-full">
                   <label className="text-xs text-gray-400 mb-1.5 block">{label}</label>
@@ -299,18 +301,18 @@ export default function ProfilePage() {
                 className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2"
               >
                 {pwdMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Mettre à jour
+                {t('profile.update_btn', 'Mettre à jour')}
               </button>
             </div>
           </div>
 
           <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 w-full">
-            <h3 className="text-sm font-semibold text-red-400 mb-1">Supprimer le compte</h3>
-            <p className="text-xs text-gray-400 mb-3">Action irréversible — toutes vos données seront supprimées.</p>
+            <h3 className="text-sm font-semibold text-red-400 mb-1">{t('profile.delete_account', 'Supprimer le compte')}</h3>
+            <p className="text-xs text-gray-400 mb-3">{t('profile.delete_irreversible', 'Action irréversible — toutes vos données seront supprimées.')}</p>
             <div className="space-y-2 w-full">
               <input
                 className="input-field w-full border-red-500/20 text-xs"
-                placeholder='Tapez "SUPPRIMER" pour confirmer'
+                placeholder={t('profile.delete_confirm_ph', 'Tapez "SUPPRIMER" pour confirmer')}
                 value={deleteConfirm}
                 onChange={e => setDeleteConfirm(e.target.value)}
               />
@@ -319,7 +321,7 @@ export default function ProfilePage() {
                   <input
                     className="input-field w-full pr-10 border-red-500/20 text-xs"
                     type={showDeletePwd ? 'text' : 'password'}
-                    placeholder="Votre mot de passe"
+                    placeholder={t('profile.your_pwd', 'Votre mot de passe')}
                     value={deletePwd}
                     onChange={e => setDeletePwd(e.target.value)}
                   />
@@ -330,7 +332,7 @@ export default function ProfilePage() {
               )}
               {isGoogleAccount && (
                 <p className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
-                  Compte Google — aucun mot de passe requis.
+                  {t('profile.google_no_pwd', 'Compte Google — aucun mot de passe requis.')}
                 </p>
               )}
               <button
@@ -339,7 +341,7 @@ export default function ProfilePage() {
                 className="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Supprimer mon compte
+                {t('profile.delete_btn', 'Supprimer mon compte')}
               </button>
             </div>
           </div>
@@ -389,7 +391,7 @@ export default function ProfilePage() {
         <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Share2 className="w-4 h-4 text-green-400" />
-            <span className="text-sm font-semibold text-white">Lien de parrainage</span>
+            <span className="text-sm font-semibold text-white">{t('profile.referral_link', 'Lien de parrainage')}</span>
           </div>
           {referralLink ? (
             <>
@@ -413,9 +415,9 @@ export default function ProfilePage() {
         <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Link2 className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-semibold text-white">Demander des Coins</span>
+            <span className="text-sm font-semibold text-white">{t('profile.request_coins', 'Demander des Coins')}</span>
           </div>
-          <p className="text-xs text-gray-400 mb-2">Partagez ce lien pour recevoir des Coins.</p>
+          <p className="text-xs text-gray-400 mb-2">{t('profile.request_coins_sub', 'Partagez ce lien pour recevoir des Coins.')}</p>
           {requestLink ? (
             <div className="flex gap-2">
               <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-2.5 py-2 text-xs text-blue-400 truncate">{requestLink}</div>
@@ -431,17 +433,17 @@ export default function ProfilePage() {
       {tab === 'sessions' && (
         <div className="bg-[#111118] border border-white/5 rounded-xl w-full overflow-hidden">
           {sessions.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">Aucune session active</div>
+            <div className="p-8 text-center text-gray-400 text-sm">{t('profile.no_session', 'Aucune session active')}</div>
           ) : sessions.map((s: any) => (
             <div key={s.id} className="flex items-center gap-3 p-3 sm:p-4 border-b border-white/5 last:border-0">
               <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center flex-shrink-0">
                 <Monitor className="w-4 h-4 text-gray-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs sm:text-sm text-white truncate">{s.userAgent || 'Navigateur inconnu'}</div>
+                <div className="text-xs sm:text-sm text-white truncate">{s.userAgent || t('profile.unknown_browser', 'Navigateur inconnu')}</div>
                 <div className="text-[10px] sm:text-xs text-gray-500 flex flex-wrap gap-2 mt-0.5">
                   {s.ip && <span className="flex items-center gap-1 truncate"><Globe className="w-3 h-3 flex-shrink-0" />{s.ip}</span>}
-                  <span className="flex items-center gap-1 whitespace-nowrap"><Clock className="w-3 h-3" />Expire {formatRelative(s.expiresAt)}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><Clock className="w-3 h-3" />{t('profile.expires', 'Expire')} {formatRelative(s.expiresAt)}</span>
                 </div>
               </div>
               <button

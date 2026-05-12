@@ -13,8 +13,8 @@ import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import { formatDateTime, cn, copyToClipboard } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
+import { useSettings } from '@/lib/settingsContext';
 
-const TX_TABS = ['Tous', 'Recus', 'Envoyes', 'Bonus', 'Depenses'];
 
 // ─── Lookup utilisateur ───────────────────────────────────────────
 async function lookupUser(id: string) {
@@ -28,6 +28,7 @@ async function lookupUser(id: string) {
 
 export default function CoinsPage() {
   const { data: session } = useSession();
+  const { t } = useSettings();
   const qc   = useQueryClient();
   const user = session?.user as any;
 
@@ -35,7 +36,12 @@ export default function CoinsPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const [txTab, setTxTab]               = useState('Tous');
+  const TX_TABS = [
+    t('coins.tab_all', 'Tous'), t('coins.tab_received', 'Recus'),
+    t('coins.tab_sent', 'Envoyes'), t('coins.tab_bonus', 'Bonus'),
+    t('coins.tab_spent', 'Depenses'),
+  ];
+  const [txTab, setTxTab] = useState(TX_TABS[0]);
   const [transferId, setTransferId]     = useState('');
   const [transferAmount, setTransferAmount] = useState('');
   const [bonusCode, setBonusCode]       = useState('');
@@ -164,15 +170,15 @@ export default function CoinsPage() {
   };
 
   const txTypeLabel: Record<string, string> = {
-    DAILY_BONUS:       'Bonus quotidien',
-    REFERRAL:          'Parrainage',
-    TRANSFER_SENT:     'Envoi',
-    TRANSFER_RECEIVED: 'Réception',
-    PURCHASE:          'Achat',
-    BONUS_CODE:        'Code bonus',
-    DEPLOY_BOT:        'Déploiement bot',
-    CREATE_SERVER:     'Création serveur',
-    ADMIN_GRANT:       'Crédit admin',
+    DAILY_BONUS:       t('coins.tx_type.DAILY_BONUS', 'Bonus quotidien'),
+    REFERRAL:          t('coins.tx_type.REFERRAL', 'Parrainage'),
+    TRANSFER_SENT:     t('coins.tx_type.TRANSFER_SENT', 'Envoi'),
+    TRANSFER_RECEIVED: t('coins.tx_type.TRANSFER_RECEIVED', 'Réception'),
+    PURCHASE:          t('coins.tx_type.PURCHASE', 'Achat'),
+    BONUS_CODE:        t('coins.tx_type.BONUS_CODE', 'Code bonus'),
+    DEPLOY_BOT:        t('coins.tx_type.DEPLOY_BOT', 'Déploiement bot'),
+    CREATE_SERVER:     t('coins.tx_type.CREATE_SERVER', 'Création serveur'),
+    ADMIN_GRANT:       t('coins.tx_type.ADMIN_GRANT', 'Crédit admin'),
   };
 
   // ── Liens (seulement côté client après montage) ──────────────────
@@ -185,19 +191,19 @@ export default function CoinsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Gérer mes Coins</h1>
+        <h1 className="text-2xl font-bold text-white">{t('coins.title', 'Gérer mes Coins')}</h1>
         <p className="text-gray-400 text-sm mt-1">
-          Consultez, envoyez, recevez et gérez vos Coins facilement.
+          {t('coins.subtitle', 'Consultez, envoyez, recevez et gérez vos Coins facilement.')}
         </p>
       </div>
 
       {/* ── Statistiques solde ──────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'SOLDE ACTUEL',   value: balance, sub: '+5 aujourd\'hui', subColor: 'text-green-400',  icon: Coins,         bg: 'from-yellow-500/10 to-orange-500/5' },
-          { label: 'TOTAL GAGNÉ',    value: transactions.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0), sub: 'Tout le temps', subColor: 'text-gray-400', icon: ArrowDownLeft, bg: 'from-green-500/10 to-emerald-500/5' },
-          { label: 'TOTAL DÉPENSÉ',  value: Math.abs(transactions.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0)), sub: 'Tout le temps', subColor: 'text-gray-400', icon: ArrowUpRight, bg: 'from-red-500/10 to-rose-500/5' },
-          { label: 'EN ATTENTE',     value: 0,       sub: 'Transactions en cours', subColor: 'text-gray-400', icon: Clock, bg: 'from-blue-500/10 to-cyan-500/5' },
+          { label: t('coins.balance', 'SOLDE ACTUEL'), value: balance, sub: t('coins.today', '+5 aujourd\'hui'), subColor: 'text-green-400', icon: Coins, bg: 'from-yellow-500/10 to-orange-500/5' },
+          { label: t('coins.total_earned', 'TOTAL GAGNÉ'), value: transactions.filter(tx => tx.amount > 0).reduce((a, tx) => a + tx.amount, 0), sub: t('coins.all_time', 'Tout le temps'), subColor: 'text-gray-400', icon: ArrowDownLeft, bg: 'from-green-500/10 to-emerald-500/5' },
+          { label: t('coins.total_spent', 'TOTAL DÉPENSÉ'), value: Math.abs(transactions.filter(tx => tx.amount < 0).reduce((a, tx) => a + tx.amount, 0)), sub: t('coins.all_time', 'Tout le temps'), subColor: 'text-gray-400', icon: ArrowUpRight, bg: 'from-red-500/10 to-rose-500/5' },
+          { label: t('coins.pending', 'EN ATTENTE'), value: 0, sub: t('coins.pending_desc', 'Transactions en cours'), subColor: 'text-gray-400', icon: Clock, bg: 'from-blue-500/10 to-cyan-500/5' },
         ].map((stat) => (
           <div key={stat.label} className={`bg-gradient-to-br ${stat.bg} border border-white/5 rounded-xl p-4`}>
             <div className="text-xs font-semibold text-gray-500 mb-2">{stat.label}</div>
@@ -217,18 +223,18 @@ export default function CoinsPage() {
             <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
               <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
                 <Send className="w-4 h-4 text-purple-400" />
-                Envoyer des Coins
+                {t('coins.send_title', 'Envoyer des Coins')}
               </h3>
-              <p className="text-xs text-gray-400 mb-4">Transférez des Coins à un autre utilisateur.</p>
+              <p className="text-xs text-gray-400 mb-4">{t('coins.send_sub', 'Transférez des Coins à un autre utilisateur.')}</p>
               <div className="space-y-3">
 
                 {/* ID + lookup */}
                 <div>
-                  <label className="text-xs text-gray-400 mb-1.5 block">ID utilisateur</label>
+                  <label className="text-xs text-gray-400 mb-1.5 block">{t('coins.user_id', 'ID utilisateur')}</label>
                   <div className="relative">
                     <input
                       className="input-field w-full pr-8"
-                      placeholder="ID de l'utilisateur..."
+                      placeholder={t('coins.user_id_ph', 'ID de l\'utilisateur...')}
                       value={transferId}
                       onChange={e => setTransferId(e.target.value)}
                     />
@@ -253,14 +259,14 @@ export default function CoinsPage() {
                   {lookupState === 'notfound' && transferId.trim().length >= 4 && (
                     <p className="mt-1.5 text-xs text-red-400 flex items-center gap-1">
                       <UserX className="w-3.5 h-3.5" />
-                      {transferId.trim() === user?.id ? 'Impossible de s\'envoyer à soi-même.' : 'Utilisateur non trouvé.'}
+                      {transferId.trim() === user?.id ? t('coins.self_send', 'Impossible de s\'envoyer à soi-même.') : t('coins.user_not_found', 'Utilisateur non trouvé.')}
                     </p>
                   )}
                 </div>
 
                 {/* Montant */}
                 <div>
-                  <label className="text-xs text-gray-400 mb-1.5 block">Montant</label>
+                  <label className="text-xs text-gray-400 mb-1.5 block">{t('coins.amount', 'Montant')}</label>
                   <div className="relative">
                     <input
                       className="input-field w-full pr-16"
@@ -274,13 +280,13 @@ export default function CoinsPage() {
                   </div>
                   {amountNum > 0 && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Frais : {FEE} Coin · Total prélevé :{' '}
+                      {t('coins.fee', 'Frais')} : {FEE} Coin · {t('coins.total', 'Total prélevé')} :{' '}
                       <span className="text-amber-400 font-medium">{total}</span>
                     </p>
                   )}
                   {notEnoughFunds && (
                     <p className="text-xs text-red-400 mt-1">
-                      Solde insuffisant ({balance} Coins disponibles, {total} requis).
+                      {t('coins.insufficient', 'Solde insuffisant')} ({balance} Coins {t('coins.insufficient_detail', 'disponibles, requis).')?.split(',')[0]}, {total} {t('coins.insufficient_detail', 'disponibles, requis).')?.split(',')[1]}
                     </p>
                   )}
                 </div>
@@ -309,14 +315,14 @@ export default function CoinsPage() {
             <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
               <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
                 <Link2 className="w-4 h-4 text-blue-400" />
-                Demander des Coins
+                {t('coins.request_title', 'Demander des Coins')}
               </h3>
               <p className="text-xs text-gray-400 mb-4">
-                Générez un lien pour demander des Coins à la communauté.
+                {t('coins.request_sub', 'Générez un lien pour demander des Coins à la communauté.')}
               </p>
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs text-gray-400 mb-1.5 block">Votre lien de demande</label>
+                  <label className="text-xs text-gray-400 mb-1.5 block">{t('coins.request_link', 'Votre lien de demande')}</label>
                   <div className="flex gap-2">
                     <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-3 py-2 text-xs text-purple-400 truncate">
                       {mounted ? requestLink : '...'}
@@ -330,7 +336,7 @@ export default function CoinsPage() {
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-400 mb-2">Partager votre lien</div>
+                  <div className="text-xs text-gray-400 mb-2">{t('coins.share_link', 'Partager votre lien')}</div>
                   <div className="flex gap-2">
                     {['WhatsApp', 'Discord', 'Telegram', 'Twitter'].map(s => (
                       <button
@@ -348,7 +354,7 @@ export default function CoinsPage() {
 
           {/* ── Historique transactions ─────────────────────────── */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-            <h3 className="font-semibold text-white mb-4">Historique des transactions</h3>
+            <h3 className="font-semibold text-white mb-4">{t('coins.tx_history', 'Historique des transactions')}</h3>
             <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
               {TX_TABS.map(tab => (
                 <button
@@ -367,11 +373,11 @@ export default function CoinsPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-gray-500 border-b border-white/5">
-                    <th className="text-left pb-3 font-medium">TYPE</th>
-                    <th className="text-left pb-3 font-medium">DESCRIPTION</th>
-                    <th className="text-right pb-3 font-medium">MONTANT</th>
-                    <th className="text-right pb-3 font-medium hidden sm:table-cell">DATE</th>
-                    <th className="text-right pb-3 font-medium hidden md:table-cell">STATUT</th>
+                    <th className="text-left pb-3 font-medium">{t('coins.col_type', 'TYPE')}</th>
+                    <th className="text-left pb-3 font-medium">{t('coins.col_desc', 'DESCRIPTION')}</th>
+                    <th className="text-right pb-3 font-medium">{t('coins.col_amount', 'MONTANT')}</th>
+                    <th className="text-right pb-3 font-medium hidden sm:table-cell">{t('coins.col_date', 'DATE')}</th>
+                    <th className="text-right pb-3 font-medium hidden md:table-cell">{t('coins.col_status', 'STATUT')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -383,7 +389,7 @@ export default function CoinsPage() {
                     </tr>
                   ) : transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-gray-400">Aucune transaction</td>
+                      <td colSpan={5} className="py-8 text-center text-gray-400">{t('coins.no_tx', 'Aucune transaction')}</td>
                     </tr>
                   ) : transactions.map((tx: any) => (
                     <tr key={tx.id} className="hover:bg-white/5 transition-colors">
@@ -403,7 +409,7 @@ export default function CoinsPage() {
                         {mounted ? formatDateTime(tx.createdAt) : '...'}
                       </td>
                       <td className="py-3 text-right hidden md:table-cell">
-                        <span className="px-2 py-0.5 bg-green-500/10 text-green-400 rounded-full">Complété</span>
+                        <span className="px-2 py-0.5 bg-green-500/10 text-green-400 rounded-full">{t('common.completed', 'Complété')}</span>
                       </td>
                     </tr>
                   ))}
@@ -421,7 +427,7 @@ export default function CoinsPage() {
             <div className="flex items-center gap-2 mb-3">
               <Gift className="w-4 h-4 text-yellow-400" />
               <span className="text-sm font-semibold text-yellow-400 uppercase tracking-wide">
-                Récompense quotidienne
+                {t('coins.daily_reward', 'Récompense quotidienne')}
               </span>
             </div>
             <div className="text-center py-3">
@@ -434,13 +440,13 @@ export default function CoinsPage() {
                 >
                   {claimMutation.isPending
                     ? <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                    : 'Réclamer'
+                    : t('coins.claim', 'Réclamer')
                   }
                 </button>
               ) : (
                 <div className="text-xs text-gray-400 mt-2">
                   <Clock className="w-4 h-4 mx-auto mb-1 text-gray-500" />
-                  Reviens dans {countdown}
+                  {t('coins.come_back', 'Reviens dans')} {countdown}
                 </div>
               )}
             </div>
@@ -450,13 +456,13 @@ export default function CoinsPage() {
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Tag className="w-4 h-4 text-purple-400" />
-              <span className="text-sm font-semibold text-white">Code Bonus</span>
+              <span className="text-sm font-semibold text-white">{t('coins.bonus_code', 'Code Bonus')}</span>
             </div>
-            <p className="text-xs text-gray-400 mb-3">Utilise un code bonus pour gagner des Coins.</p>
+            <p className="text-xs text-gray-400 mb-3">{t('coins.bonus_sub', 'Utilise un code bonus pour gagner des Coins.')}</p>
             <div className="flex gap-2">
               <input
                 className="input-field flex-1"
-                placeholder="Entrez votre code"
+                placeholder={t('coins.bonus_ph', 'Entrez votre code')}
                 value={bonusCode}
                 onChange={e => setBonusCode(e.target.value.toUpperCase())}
                 onKeyDown={e => e.key === 'Enter' && bonusCode && bonusMutation.mutate()}
@@ -466,7 +472,7 @@ export default function CoinsPage() {
                 disabled={!bonusCode || bonusMutation.isPending}
                 className="btn-primary px-4"
               >
-                {bonusMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Utiliser'}
+                {bonusMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('coins.use', 'Utiliser')}
               </button>
             </div>
           </div>
@@ -475,7 +481,7 @@ export default function CoinsPage() {
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-4">
               <Trophy className="w-4 h-4 text-yellow-400" />
-              <span className="text-sm font-semibold text-white">Classement Parrainage</span>
+              <span className="text-sm font-semibold text-white">{t('coins.referral_rank', 'Classement Parrainage')}</span>
             </div>
             <div className="space-y-2">
               {leaderboard.slice(0, 5).map((entry: any, i: number) => (
@@ -497,13 +503,13 @@ export default function CoinsPage() {
                 </div>
               ))}
               {leaderboard.length === 0 && (
-                <p className="text-xs text-gray-500 text-center py-2">Aucun classement disponible</p>
+                <p className="text-xs text-gray-500 text-center py-2">{t('coins.no_rank', 'Aucun classement disponible')}</p>
               )}
             </div>
 
             {referralLink && (
               <div className="mt-4 pt-4 border-t border-white/5">
-                <p className="text-xs text-gray-400 mb-2">Votre lien de parrainage</p>
+                <p className="text-xs text-gray-400 mb-2">{t('coins.referral_link', 'Votre lien de parrainage')}</p>
                 <div className="flex gap-2">
                   <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-2 py-1.5 text-xs text-purple-400 truncate">
                     {mounted ? referralLink : '...'}

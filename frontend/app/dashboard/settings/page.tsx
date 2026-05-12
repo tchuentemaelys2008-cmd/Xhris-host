@@ -16,11 +16,11 @@ import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { useSettings } from '@/lib/settingsContext';
 
-const TABS = [
-  { id: 'general', label: 'Général', icon: Settings },
-  { id: 'notifs', label: 'Notifications', icon: Bell },
-  { id: 'privacy', label: 'Confidentialité', icon: Shield },
-  { id: 'danger', label: 'Compte', icon: Trash2 },
+const TABS_DEF = [
+  { id: 'general', key: 'settings.general', fallback: 'Général', icon: Settings },
+  { id: 'notifs',  key: 'settings.notifications', fallback: 'Notifications', icon: Bell },
+  { id: 'privacy', key: 'settings.privacy', fallback: 'Confidentialité', icon: Shield },
+  { id: 'danger',  key: 'settings.account', fallback: 'Compte', icon: Trash2 },
 ];
 
 const LANGUAGES = [
@@ -130,18 +130,18 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Paramètres</h1>
-        <p className="text-gray-400 text-sm mt-1">Configurez votre expérience XHRIS Host.</p>
+        <h1 className="text-2xl font-bold text-white">{t('settings.title', 'Paramètres')}</h1>
+        <p className="text-gray-400 text-sm mt-1">{t('settings.subtitle', 'Configurez votre expérience XHRIS Host.')}</p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-[#0D0D14] border border-white/5 rounded-xl p-1 overflow-x-auto">
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+        {TABS_DEF.map(td => (
+          <button key={td.id} onClick={() => setTab(td.id)}
             className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-all',
-              tab === t.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white')}>
-            <t.icon className="w-4 h-4" />
-            <span className="hidden sm:inline">{t.label}</span>
+              tab === td.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white')}>
+            <td.icon className="w-4 h-4" />
+            <span className="hidden sm:inline">{t(td.key, td.fallback)}</span>
           </button>
         ))}
       </div>
@@ -152,7 +152,7 @@ export default function SettingsPage() {
 
           {/* Username change */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5 space-y-3">
-            <h3 className="font-semibold text-white text-sm">Changer de pseudo</h3>
+            <h3 className="font-semibold text-white text-sm">{t('settings.username_title', 'Changer de pseudo')}</h3>
             <div className="flex gap-2">
               <input
                 className="input-field flex-1"
@@ -276,7 +276,7 @@ export default function SettingsPage() {
                 ? <CheckCircle className="w-4 h-4 text-green-400" />
                 : <Save className="w-4 h-4" />
             }
-            {saved ? 'Enregistré !' : 'Enregistrer les modifications'}
+            {saved ? t('settings.saved', 'Enregistré !') : t('settings.save', 'Enregistrer les modifications')}
           </button>
         </motion.div>
       )}
@@ -286,11 +286,11 @@ export default function SettingsPage() {
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
           className="bg-[#111118] border border-white/5 rounded-xl p-6 space-y-0 divide-y divide-white/5">
           {[
-            { key: 'notifEmail', icon: Mail, label: 'Notifications par email', desc: 'Recevez des alertes importantes par email' },
-            { key: 'notifPush', icon: Bell, label: 'Notifications push', desc: 'Alertes instantanées dans votre navigateur' },
-            { key: 'notifBots', icon: Smartphone, label: 'Activité des bots', desc: 'Démarrages, arrêts et erreurs de vos bots' },
-            { key: 'notifCoins', icon: Smartphone, label: 'Transactions Coins', desc: 'Réceptions, envois et bonus de Coins' },
-            { key: 'notifMarketing', icon: Mail, label: 'Emails promotionnels', desc: 'Offres spéciales et nouveautés' },
+            { key: 'notifEmail', icon: Mail, label: t('settings.notif_email', 'Notifications par email'), desc: t('settings.notif_email_desc', 'Recevez des alertes importantes par email') },
+            { key: 'notifPush', icon: Bell, label: t('settings.notif_push', 'Notifications push'), desc: t('settings.notif_push_desc', 'Alertes instantanées dans votre navigateur') },
+            { key: 'notifBots', icon: Smartphone, label: t('settings.notif_bots', 'Activité des bots'), desc: t('settings.notif_bots_desc', 'Démarrages, arrêts et erreurs de vos bots') },
+            { key: 'notifCoins', icon: Smartphone, label: t('settings.notif_coins', 'Transactions Coins'), desc: t('settings.notif_coins_desc', 'Réceptions, envois et bonus de Coins') },
+            { key: 'notifMarketing', icon: Mail, label: t('settings.notif_marketing', 'Emails promotionnels'), desc: t('settings.notif_marketing_desc', 'Offres spéciales et nouveautés') },
           ].map(item => (
             <div key={item.key} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
               <div className="flex items-center gap-3">
@@ -316,9 +316,9 @@ export default function SettingsPage() {
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <div className="bg-[#111118] border border-white/5 rounded-xl p-6 space-y-0 divide-y divide-white/5">
             {[
-              { key: 'profilePublic', label: 'Profil public', desc: 'Votre profil est visible par les autres membres' },
-              { key: 'showCoins', label: 'Afficher mon solde', desc: 'Votre solde Coins visible sur votre profil' },
-              { key: 'showBots', label: 'Afficher mes bots', desc: 'Votre liste de bots visible publiquement' },
+              { key: 'profilePublic', label: t('settings.profile_public', 'Profil public'), desc: t('settings.profile_public_desc', 'Votre profil est visible par les autres membres') },
+              { key: 'showCoins', label: t('settings.show_coins', 'Afficher mon solde'), desc: t('settings.show_coins_desc', 'Votre solde Coins visible sur votre profil') },
+              { key: 'showBots', label: t('settings.show_bots', 'Afficher mes bots'), desc: t('settings.show_bots_desc', 'Votre liste de bots visible publiquement') },
             ].map(item => (
               <div key={item.key} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
                 <div>
@@ -333,10 +333,10 @@ export default function SettingsPage() {
             ))}
           </div>
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-            <h4 className="text-sm font-semibold text-white mb-3">Sessions actives</h4>
-            <p className="text-xs text-gray-400 mb-3">Gérez les appareils connectés à votre compte.</p>
+            <h4 className="text-sm font-semibold text-white mb-3">{t('settings.sessions', 'Sessions actives')}</h4>
+            <p className="text-xs text-gray-400 mb-3">{t('settings.sessions_sub', 'Gérez les appareils connectés à votre compte.')}</p>
             <Link href="/dashboard/profile" className="btn-secondary text-sm flex items-center gap-2 w-fit">
-              Voir les sessions <ChevronRight className="w-4 h-4" />
+              {t('settings.see_sessions', 'Voir les sessions')} <ChevronRight className="w-4 h-4" />
             </Link>
           </div>
         </motion.div>
@@ -347,28 +347,27 @@ export default function SettingsPage() {
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5 flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Se déconnecter</div>
-              <div className="text-xs text-gray-400">Fermer cette session</div>
+              <div className="text-sm font-medium text-white">{t('settings.logout', 'Se déconnecter')}</div>
+              <div className="text-xs text-gray-400">{t('settings.logout_desc', 'Fermer cette session')}</div>
             </div>
             <button onClick={() => signOut({ callbackUrl: '/' })} className="btn-secondary flex items-center gap-2 text-sm text-red-400 border-red-500/20 hover:bg-red-500/10">
-              <LogOut className="w-4 h-4" /> Déconnexion
+              <LogOut className="w-4 h-4" /> {t('nav.logout', 'Déconnexion')}
             </button>
           </div>
 
           <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6">
-            <h3 className="text-base font-semibold text-red-400 mb-1">Zone de danger</h3>
+            <h3 className="text-base font-semibold text-red-400 mb-1">{t('settings.danger', 'Zone de danger')}</h3>
             <p className="text-sm text-gray-400 mb-4">
-              La suppression de votre compte est <strong className="text-white">irréversible</strong>.
-              Toutes vos données, Coins, bots et serveurs seront définitivement supprimés.
+              {t('settings.danger_sub', 'La suppression de votre compte est irréversible. Toutes vos données, Coins, bots et serveurs seront définitivement supprimés.')}
             </p>
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-gray-400 mb-1.5 block">
-                  Tapez <span className="text-red-400 font-mono">SUPPRIMER</span> pour confirmer
+                  {t('settings.delete_confirm_label', 'Tapez SUPPRIMER pour confirmer')}
                 </label>
                 <input
                   className="input-field w-full border-red-500/20"
-                  placeholder="SUPPRIMER"
+                  placeholder={t('settings.delete_word', 'SUPPRIMER')}
                   value={deleteConfirm}
                   onChange={e => setDeleteConfirm(e.target.value)}
                 />
@@ -394,11 +393,11 @@ export default function SettingsPage() {
               </div>
               <button
                 onClick={() => deleteMutation.mutate()}
-                disabled={deleteConfirm !== 'SUPPRIMER' || !deletePassword || deleteMutation.isPending}
+                disabled={deleteConfirm !== t('settings.delete_word', 'SUPPRIMER') || !deletePassword || deleteMutation.isPending}
                 className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Supprimer définitivement mon compte
+                {t('settings.delete_btn', 'Supprimer définitivement mon compte')}
               </button>
             </div>
           </div>

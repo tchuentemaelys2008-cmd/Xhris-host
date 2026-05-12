@@ -12,6 +12,7 @@ import { Bot, Server, Coins, Zap, ArrowRight, Copy, Loader2, Crown, Newspaper, U
 import { userApi, coinsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import { useSettings } from '@/lib/settingsContext';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -20,7 +21,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         <p className="text-gray-400 mb-1">{label}</p>
         {payload.map((p: any) => (
           <p key={p.name} style={{ color: p.color }}>
-            {p.name === 'used' ? 'Utilisés' : 'Gagnés'}: {p.value}
+            {p.name === 'used' ? '−' : '+'}: {p.value}
           </p>
         ))}
       </div>
@@ -44,13 +45,14 @@ const TX_ICONS: Record<string, any> = {
 };
 const txIcon = (type: string) => TX_ICONS[type] || Coins;
 
-const DEPLOY_STEPS = ['Choisir un bot', 'Configurer', 'Déployer'];
-
 export default function DashboardPage() {
   const { data: session } = useSession();
+  const { t } = useSettings();
   const qc = useQueryClient();
   const user = session?.user as any;
   const [activeStep, setActiveStep] = useState(0);
+
+  const DEPLOY_STEPS = [t('dashboard.deploy_step1', 'Choisir un bot'), t('dashboard.deploy_step2', 'Configurer'), t('dashboard.deploy_step3', 'Déployer')];
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -110,10 +112,10 @@ export default function DashboardPage() {
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
       qc.invalidateQueries({ queryKey: ['coins-balance'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
-      toast.success('+3 Coins bonus quotidien reçus !');
+      toast.success(t('dashboard.bonus_success', '+3 Coins bonus quotidien reçus !'));
     },
     onError: (e: any) => {
-      toast.error(e?.response?.data?.message || 'Bonus déjà réclamé aujourd\'hui');
+      toast.error(e?.response?.data?.message || t('dashboard.bonus_error', 'Bonus déjà réclamé aujourd\'hui'));
     },
   });
 
@@ -123,10 +125,10 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">
-            Bienvenue, <span className="text-purple-400">{user?.name || 'Utilisateur'}</span>
+            {t('dashboard.welcome', 'Bienvenue,')} <span className="text-purple-400">{user?.name || 'Utilisateur'}</span>
           </h1>
           <p className="text-gray-400 text-sm mt-1">
-            Gérez vos bots, serveurs et crédits depuis votre dashboard.
+            {t('dashboard.subtitle', 'Gérez vos bots, serveurs et crédits depuis votre dashboard.')}
           </p>
         </div>
 
@@ -156,7 +158,7 @@ export default function DashboardPage() {
           ) : (
             <Gift className="w-4 h-4" />
           )}
-          {dailyBonusClaimed ? 'Bonus réclamé' : 'Récupérer +3 Coins'}
+          {dailyBonusClaimed ? t('dashboard.bonus_claimed', 'Bonus réclamé') : t('dashboard.claim_bonus', 'Récupérer +3 Coins')}
         </motion.button>
       </div>
 
@@ -168,10 +170,10 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { Icon: Coins, iconColor: 'text-amber-400', iconBg: 'bg-amber-500/10', value: String(balance), label: 'Coins Actuels', sub: stats.coinsEarnedToday ? `+${stats.coinsEarnedToday} aujourd'hui` : 'Solde actuel', subColor: stats.coinsEarnedToday ? 'text-green-400' : 'text-gray-500', bg: 'from-yellow-500/10 to-orange-500/5' },
-            { Icon: Zap, iconColor: 'text-blue-400', iconBg: 'bg-blue-500/10', value: `${deploymentsLeft} / jour`, label: 'Déploiements Restants', sub: deploymentResetIn ? `Reset dans ${deploymentResetIn}` : 'Disponibles', subColor: 'text-blue-400', bg: 'from-blue-500/10 to-cyan-500/5' },
-            { Icon: Server, iconColor: 'text-purple-400', iconBg: 'bg-purple-500/10', value: String(activeServers), label: 'Serveurs Actifs', sub: activeServers === 0 ? 'Aucun serveur actif' : `${activeServers} en ligne`, subColor: 'text-purple-400', bg: 'from-purple-500/10 to-indigo-500/5' },
-            { Icon: plan === 'FREE' ? Coins : Crown, iconColor: plan === 'FREE' ? 'text-gray-400' : 'text-yellow-400', iconBg: plan === 'FREE' ? 'bg-gray-500/10' : 'bg-yellow-500/10', value: plan === 'FREE' ? 'Gratuit' : plan, label: 'Statut actuel', sub: planExpiry ? `Valide jusqu'au ${planExpiry}` : plan === 'FREE' ? 'Passez à Premium' : 'Actif', subColor: plan === 'FREE' ? 'text-gray-400' : 'text-yellow-400', bg: 'from-yellow-500/10 to-amber-500/5' },
+            { Icon: Coins, iconColor: 'text-amber-400', iconBg: 'bg-amber-500/10', value: String(balance), label: t('dashboard.coins_label', 'Coins Actuels'), sub: stats.coinsEarnedToday ? `+${stats.coinsEarnedToday} ${t('dashboard.coins_today', 'aujourd\'hui')}` : t('dashboard.current_balance', 'Solde actuel'), subColor: stats.coinsEarnedToday ? 'text-green-400' : 'text-gray-500', bg: 'from-yellow-500/10 to-orange-500/5' },
+            { Icon: Zap, iconColor: 'text-blue-400', iconBg: 'bg-blue-500/10', value: `${deploymentsLeft} / ${t('common.day', 'jour')}`, label: t('dashboard.deployments', 'Déploiements Restants'), sub: deploymentResetIn ? `${t('dashboard.deployments_reset', 'Reset dans')} ${deploymentResetIn}` : t('dashboard.deployments_available', 'Disponibles'), subColor: 'text-blue-400', bg: 'from-blue-500/10 to-cyan-500/5' },
+            { Icon: Server, iconColor: 'text-purple-400', iconBg: 'bg-purple-500/10', value: String(activeServers), label: t('dashboard.active_servers', 'Serveurs Actifs'), sub: activeServers === 0 ? t('dashboard.no_server', 'Aucun serveur actif') : `${activeServers} ${t('dashboard.online', 'en ligne')}`, subColor: 'text-purple-400', bg: 'from-purple-500/10 to-indigo-500/5' },
+            { Icon: plan === 'FREE' ? Coins : Crown, iconColor: plan === 'FREE' ? 'text-gray-400' : 'text-yellow-400', iconBg: plan === 'FREE' ? 'bg-gray-500/10' : 'bg-yellow-500/10', value: plan === 'FREE' ? t('dashboard.free_plan', 'Gratuit') : plan, label: t('dashboard.status', 'Statut actuel'), sub: planExpiry ? `${t('dashboard.valid_until', 'Valide jusqu\'au')} ${planExpiry}` : plan === 'FREE' ? t('dashboard.upgrade_premium', 'Passez à Premium') : t('dashboard.plan_active', 'Actif'), subColor: plan === 'FREE' ? 'text-gray-400' : 'text-yellow-400', bg: 'from-yellow-500/10 to-amber-500/5' },
           ].map((stat, i) => (
             <motion.div
               key={stat.label}
@@ -205,9 +207,9 @@ export default function DashboardPage() {
               <Bot className="w-5 h-5 text-green-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-white">Déployer un Bot</h3>
+              <h3 className="font-semibold text-white">{t('dashboard.deploy_bot', 'Déployer un Bot')}</h3>
               <p className="text-xs text-gray-400">
-                Choisissez un bot, configurez vos variables et déployez en quelques clics.
+                {t('dashboard.deploy_sub', 'Choisissez un bot, configurez vos variables et déployez en quelques clics.')}
               </p>
             </div>
           </div>
@@ -244,20 +246,20 @@ export default function DashboardPage() {
               <Bot className="w-4 h-4 text-green-400" />
             </div>
             <div className="flex-1">
-              <div className="text-sm font-medium text-white">{activeBots} bot(s) actif(s)</div>
-              <div className="text-xs text-gray-400">Voir et gérer dans la section Bots</div>
+              <div className="text-sm font-medium text-white">{activeBots} {t('dashboard.active_bots', 'bot(s) actif(s)')}</div>
+              <div className="text-xs text-gray-400">{t('dashboard.bots_manage', 'Voir et gérer dans la section Bots')}</div>
             </div>
             <Link href="/dashboard/bots" className="text-xs text-purple-400 hover:text-purple-300">
-              Gérer →
+              {t('common.manage', 'Gérer')} →
             </Link>
           </div>
 
           <Link href="/dashboard/bots" className="btn-primary w-full py-3 flex items-center justify-center gap-2">
             <Zap className="w-4 h-4" />
-            Voir mes Bots
+            {t('dashboard.bots_cta', 'Voir mes Bots')}
           </Link>
           <p className="text-xs text-gray-500 text-center mt-2">
-            Coût : 10 Coins / jour ou Abonnement (100 Coins / semaine)
+            {t('dashboard.bots_cost', 'Coût : 10 Coins / jour ou Abonnement (100 Coins / semaine)')}
           </p>
         </motion.div>
 
@@ -273,9 +275,9 @@ export default function DashboardPage() {
               <Server className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-white">Créer un Serveur</h3>
+              <h3 className="font-semibold text-white">{t('dashboard.create_server', 'Créer un Serveur')}</h3>
               <p className="text-xs text-gray-400">
-                Créez votre propre serveur, uploadez vos fichiers et lancez votre bot.
+                {t('dashboard.server_sub', 'Créez votre propre serveur, uploadez vos fichiers et lancez votre bot.')}
               </p>
             </div>
           </div>
@@ -296,7 +298,7 @@ export default function DashboardPage() {
               >
                 {p.popular && (
                   <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full">
-                    Populaire
+                    {t('common.popular', 'Populaire')}
                   </div>
                 )}
                 <div className="text-sm font-medium text-white mb-1">{p.name}</div>
@@ -310,16 +312,16 @@ export default function DashboardPage() {
           </div>
 
           <div className="bg-[#1A1A24] border border-white/5 rounded-lg p-3 mb-4">
-            <div className="text-sm text-white mb-1">Serveurs actifs : {activeServers}</div>
-            <div className="text-xs text-gray-400">Gérez vos serveurs et contrôlez-les en un clic.</div>
+            <div className="text-sm text-white mb-1">{t('dashboard.server_active', 'Serveurs actifs :')} {activeServers}</div>
+            <div className="text-xs text-gray-400">{t('dashboard.server_manage', 'Gérez vos serveurs et contrôlez-les en un clic.')}</div>
           </div>
 
           <Link href="/dashboard/servers" className="btn-primary w-full py-3 flex items-center justify-center gap-2">
             <Server className="w-4 h-4" />
-            Gérer les Serveurs
+            {t('dashboard.server_cta', 'Gérer les Serveurs')}
           </Link>
           <p className="text-xs text-gray-500 text-center mt-2">
-            Le serveur s'arrêtera si vous n'avez plus de Coins.
+            {t('dashboard.server_warning', 'Le serveur s\'arrêtera si vous n\'avez plus de Coins.')}
           </p>
         </motion.div>
       </div>
@@ -333,17 +335,17 @@ export default function DashboardPage() {
           transition={{ delay: 0.5 }}
           className="bg-[#111118] border border-white/5 rounded-xl p-4"
         >
-          <h3 className="text-sm font-medium text-white mb-4">Résumé d'utilisation</h3>
+          <h3 className="text-sm font-medium text-white mb-4">{t('dashboard.usage_chart', 'Résumé d\'utilisation')}</h3>
           {usageData.length > 0 ? (
             <>
               <div className="flex items-center gap-4 mb-3 text-xs">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-red-400" />
-                  <span className="text-gray-400">Utilisés</span>
+                  <span className="text-gray-400">{t('dashboard.used', 'Utilisés')}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-green-400" />
-                  <span className="text-gray-400">Gagnés</span>
+                  <span className="text-gray-400">{t('dashboard.earned', 'Gagnés')}</span>
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={120}>
@@ -369,7 +371,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex flex-col items-center justify-center h-32 text-gray-500 text-xs">
               <Coins className="w-8 h-8 mb-2 opacity-30" />
-              Aucune donnée disponible
+              {t('dashboard.no_chart', 'Aucune donnée disponible')}
             </div>
           )}
         </motion.div>
@@ -381,11 +383,11 @@ export default function DashboardPage() {
           transition={{ delay: 0.55 }}
           className="bg-[#111118] border border-white/5 rounded-xl p-4"
         >
-          <h3 className="text-sm font-medium text-white mb-4">Historique récent</h3>
+          <h3 className="text-sm font-medium text-white mb-4">{t('dashboard.history', 'Historique récent')}</h3>
           {transactions.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-24 text-gray-500 text-xs">
               <Coins className="w-6 h-6 mb-1 opacity-30" />
-              Aucune transaction
+              {t('dashboard.no_tx', 'Aucune transaction')}
             </div>
           ) : (
             <div className="space-y-3">
@@ -410,7 +412,7 @@ export default function DashboardPage() {
             </div>
           )}
           <Link href="/dashboard/coins" className="mt-4 text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 transition-colors">
-            Voir tout l'historique <ArrowRight className="w-3 h-3" />
+            {t('dashboard.see_all', 'Voir tout l\'historique')} <ArrowRight className="w-3 h-3" />
           </Link>
         </motion.div>
 
@@ -421,11 +423,11 @@ export default function DashboardPage() {
           transition={{ delay: 0.6 }}
           className="bg-[#111118] border border-white/5 rounded-xl p-4"
         >
-          <h3 className="text-sm font-medium text-white mb-4">Parrainage</h3>
-          <p className="text-xs text-gray-400 mb-3">Parrainez des amis et gagnez des Coins !</p>
+          <h3 className="text-sm font-medium text-white mb-4">{t('dashboard.referral', 'Parrainage')}</h3>
+          <p className="text-xs text-gray-400 mb-3">{t('dashboard.referral_sub', 'Parrainez des amis et gagnez des Coins !')}</p>
           {referralLink ? (
             <div className="mb-4">
-              <label className="text-xs text-gray-400 block mb-1">Votre lien de parrainage</label>
+              <label className="text-xs text-gray-400 block mb-1">{t('dashboard.referral_link', 'Votre lien de parrainage')}</label>
               <div className="flex gap-2">
                 <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-3 py-2 text-xs text-purple-400 truncate">
                   {referralLink}
@@ -437,21 +439,21 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="mb-4 bg-[#1A1A24] rounded-lg p-3 text-xs text-gray-500">
-              Votre code de parrainage sera affiché ici.
+              {t('dashboard.referral_code', 'Votre code de parrainage sera affiché ici.')}
             </div>
           )}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="bg-[#1A1A24] rounded-lg p-3">
-              <div className="text-xs text-gray-400">Filleuls</div>
+              <div className="text-xs text-gray-400">{t('dashboard.referrals', 'Filleuls')}</div>
               <div className="text-lg font-bold text-white">{referral.totalReferrals ?? 0}</div>
             </div>
             <div className="bg-[#1A1A24] rounded-lg p-3">
-              <div className="text-xs text-gray-400">Coins gagnés</div>
+              <div className="text-xs text-gray-400">{t('dashboard.coins_earned', 'Coins gagnés')}</div>
               <div className="text-lg font-bold text-white">{referral.coinsEarned ?? 0}</div>
             </div>
           </div>
           <Link href="/dashboard/coins" className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1">
-            Gérer les parrainages
+            {t('dashboard.manage_referrals', 'Gérer les parrainages')}
           </Link>
         </motion.div>
 
@@ -462,11 +464,11 @@ export default function DashboardPage() {
           transition={{ delay: 0.65 }}
           className="bg-[#111118] border border-white/5 rounded-xl p-4"
         >
-          <h3 className="text-sm font-medium text-white mb-4">Actualités</h3>
+          <h3 className="text-sm font-medium text-white mb-4">{t('dashboard.news', 'Actualités')}</h3>
           {news.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-24 text-gray-500 text-xs">
               <Newspaper className="w-6 h-6 mb-2 opacity-30" />
-              Aucune actualité
+              {t('dashboard.no_news', 'Aucune actualité')}
             </div>
           ) : (
             <div className="space-y-4">
@@ -485,7 +487,7 @@ export default function DashboardPage() {
             </div>
           )}
           <Link href="/dashboard/support" className="mt-4 text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 transition-colors">
-            Voir les annonces <ArrowRight className="w-3 h-3" />
+            {t('dashboard.see_news', 'Voir les annonces')} <ArrowRight className="w-3 h-3" />
           </Link>
         </motion.div>
       </div>

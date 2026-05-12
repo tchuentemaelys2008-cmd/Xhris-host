@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Bot, Server, Share2,
   User, HelpCircle, LogOut, Menu, X, Bell,
   ChevronDown, Zap, Crown, MessageSquare, Code,
-  History, Settings, Wallet, Plus,
+  History, Settings, Wallet, Plus, Languages,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 import { coinsApi, notificationsApi, userApi } from '@/lib/api';
@@ -66,6 +66,21 @@ const NAV_ITEMS = [
   { href: '/dashboard/profile',      icon: User,            key: 'nav.profile' },
   { href: '/dashboard/support',      icon: HelpCircle,      key: 'nav.support' },
 ];
+
+// ─── Bouton toggle FR/EN ─────────────────────────────────────────
+function LangToggle() {
+  const { language, setLanguage } = useSettings();
+  const next = language === 'fr' ? 'en' : 'fr';
+  return (
+    <button
+      onClick={() => setLanguage(next)}
+      className="flex items-center gap-1.5 w-9 h-9 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg justify-center transition-colors"
+      title={language === 'fr' ? 'Switch to English' : 'Passer en Français'}
+    >
+      <span className="text-xs font-bold text-gray-300">{language === 'fr' ? 'FR' : 'EN'}</span>
+    </button>
+  );
+}
 
 // Outer layout — just provides settings context
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -193,14 +208,14 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
           {/* Solde — avec icône SVG */}
           <div className="mt-3 bg-[#1A1A24] rounded-lg p-3">
-            <div className="text-xs text-gray-400 mb-1">SOLDE ACTUEL</div>
+            <div className="text-xs text-gray-400 mb-1">{t('nav.balance_label', 'SOLDE ACTUEL')}</div>
             <div className="flex items-center gap-2">
               <CoinIcon className="w-6 h-6 flex-shrink-0" />
               <div className="text-lg font-bold text-white">{balance.toLocaleString('fr-FR')}</div>
-              <span className="text-xs text-amber-400 font-medium">coins</span>
+              <span className="text-xs text-amber-400 font-medium">{t('common.coins', 'coins')}</span>
             </div>
             {coinsEarnedToday > 0 && (
-              <div className="text-xs text-green-400 mt-0.5">+{coinsEarnedToday} aujourd'hui</div>
+              <div className="text-xs text-green-400 mt-0.5">+{coinsEarnedToday} {t('dashboard.coins_today', 'aujourd\'hui')}</div>
             )}
           </div>
 
@@ -209,7 +224,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             className="btn-primary w-full mt-3 py-2 text-xs flex items-center justify-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
-            Acheter des Coins
+            {t('nav.buy_coins', 'Acheter des Coins')}
           </Link>
         </div>
 
@@ -237,25 +252,24 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
           {/* Bannière Premium avec bouton X */}
           {(!user?.plan || user.plan === 'FREE') && !premiumDismissed && (
             <div className="relative bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/20 rounded-xl p-4">
-              {/* Bouton fermer */}
               <button
                 onClick={() => setPremiumDismissed(true)}
                 className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                aria-label="Fermer"
+                aria-label={t('common.close', 'Fermer')}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
 
               <div className="flex items-center gap-2 mb-2">
                 <Crown className="w-4 h-4 text-yellow-400" />
-                <span className="text-sm font-medium text-yellow-400">Passer à Premium</span>
+                <span className="text-sm font-medium text-yellow-400">{t('nav.premium_cta', 'Passer à Premium')}</span>
               </div>
-              <p className="text-xs text-gray-400 mb-3">Profitez d'avantages exclusifs</p>
+              <p className="text-xs text-gray-400 mb-3">{t('nav.premium_sub', 'Profitez d\'avantages exclusifs')}</p>
               <Link
                 href="/dashboard/coins"
                 className="w-full py-1.5 px-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-xs rounded-lg hover:bg-yellow-500/30 transition-colors flex items-center justify-center"
               >
-                Voir les offres
+                {t('nav.see_offers', 'Voir les offres')}
               </Link>
             </div>
           )}
@@ -265,7 +279,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             className="sidebar-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-300"
           >
             <LogOut className="w-4 h-4" />
-            <span>Déconnexion</span>
+            <span>{t('nav.logout', 'Déconnexion')}</span>
           </button>
         </div>
       </aside>
@@ -283,7 +297,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="hidden lg:flex items-center gap-2 text-sm text-gray-400">
-            <span>Bienvenue,</span>
+            <span>{t('nav.welcome', 'Bienvenue,')}</span>
             <span className="text-purple-400 font-medium">{user?.name || 'Utilisateur'}</span>
           </div>
 
@@ -296,6 +310,9 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
               <span className="text-xs font-semibold text-amber-400">{balance.toLocaleString('fr-FR')}</span>
               <span className="text-amber-400 text-xs font-bold leading-none">+</span>
             </Link>
+
+            {/* Bouton langue FR/EN */}
+            <LangToggle />
 
             {/* Notifications */}
             <div className="relative">
@@ -318,15 +335,15 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                     className="absolute right-0 top-12 w-80 bg-[#1A1A24] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50"
                   >
                     <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-                      <span className="text-sm font-medium text-white">Notifications</span>
+                      <span className="text-sm font-medium text-white">{t('nav.notifications', 'Notifications')}</span>
                       {unreadCount > 0 && (
-                        <span className="text-xs text-gray-400">{unreadCount} non lue(s)</span>
+                        <span className="text-xs text-gray-400">{unreadCount} {t('nav.unread', 'non lue(s)')}</span>
                       )}
                     </div>
                     <div className="divide-y divide-white/5 max-h-80 overflow-y-auto scrollbar-thin">
                       {notifications.length === 0 ? (
                         <div className="text-center py-8 text-xs text-gray-500">
-                          Aucune notification
+                          {t('nav.no_notif', 'Aucune notification')}
                         </div>
                       ) : (
                         notifications.slice(0, 10).map((n: any, i: number) => (

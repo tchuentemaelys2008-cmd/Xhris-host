@@ -11,43 +11,44 @@ import {
 } from 'lucide-react';
 import { coinsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useSettings } from '@/lib/settingsContext';
 
-const TX_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string }> = {
-  DAILY_BONUS:       { label: 'Bonus quotidien',   icon: Gift,          color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
-  REFERRAL:          { label: 'Parrainage',         icon: Share2,        color: 'text-green-400',  bg: 'bg-green-500/10' },
-  TRANSFER_SENT:     { label: 'Envoi de coins',     icon: ArrowUpRight,  color: 'text-red-400',    bg: 'bg-red-500/10' },
-  TRANSFER_RECEIVED: { label: 'Réception de coins', icon: ArrowDownLeft, color: 'text-green-400',  bg: 'bg-green-500/10' },
-  PURCHASE:          { label: 'Achat de coins',     icon: Coins,         color: 'text-blue-400',   bg: 'bg-blue-500/10' },
-  BONUS_CODE:        { label: 'Code bonus',         icon: Tag,           color: 'text-purple-400', bg: 'bg-purple-500/10' },
-  DEPLOY_BOT:        { label: 'Déploiement bot',    icon: Bot,           color: 'text-red-400',    bg: 'bg-red-500/10' },
-  SERVER_COST:       { label: 'Coût serveur',       icon: Server,        color: 'text-orange-400', bg: 'bg-orange-500/10' },
-  ADMIN_GRANT:       { label: 'Ajout admin',        icon: Award,         color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
-  ADMIN_DEDUCT:      { label: 'Déduction admin',    icon: Award,         color: 'text-red-400',    bg: 'bg-red-500/10' },
-};
-
-// Map tab names to API type params (matching exact DB enum values)
-const TYPE_FILTERS: Record<string, string | undefined> = {
-  'Tous': undefined,
-  'Reçus': 'TRANSFER_RECEIVED',
-  'Envoyés': 'TRANSFER_SENT',
-  'Bonus': 'DAILY_BONUS',
-  'Achats': 'PURCHASE',
-};
-
-const TABS = Object.keys(TYPE_FILTERS);
 const LIMIT = 20;
 
 export default function HistoryPage() {
   const { data: session } = useSession();
+  const { t } = useSettings();
   const user = session?.user as any;
-  const [tab, setTab] = useState('Tous');
+  const [tab, setTab] = useState('all');
+
+  const TX_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string }> = {
+    DAILY_BONUS:       { label: t('history.type.DAILY_BONUS', 'Bonus quotidien'),   icon: Gift,          color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+    REFERRAL:          { label: t('history.type.REFERRAL', 'Parrainage'),            icon: Share2,        color: 'text-green-400',  bg: 'bg-green-500/10' },
+    TRANSFER_SENT:     { label: t('history.type.TRANSFER_SENT', 'Envoi de coins'),   icon: ArrowUpRight,  color: 'text-red-400',    bg: 'bg-red-500/10' },
+    TRANSFER_RECEIVED: { label: t('history.type.TRANSFER_RECEIVED', 'Réception de coins'), icon: ArrowDownLeft, color: 'text-green-400',  bg: 'bg-green-500/10' },
+    PURCHASE:          { label: t('history.type.PURCHASE', 'Achat de coins'),        icon: Coins,         color: 'text-blue-400',   bg: 'bg-blue-500/10' },
+    BONUS_CODE:        { label: t('history.type.BONUS_CODE', 'Code bonus'),          icon: Tag,           color: 'text-purple-400', bg: 'bg-purple-500/10' },
+    DEPLOY_BOT:        { label: t('history.type.DEPLOY_BOT', 'Déploiement bot'),     icon: Bot,           color: 'text-red-400',    bg: 'bg-red-500/10' },
+    SERVER_COST:       { label: t('history.type.SERVER_COST', 'Coût serveur'),       icon: Server,        color: 'text-orange-400', bg: 'bg-orange-500/10' },
+    ADMIN_GRANT:       { label: t('history.type.ADMIN_GRANT', 'Ajout admin'),        icon: Award,         color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+    ADMIN_DEDUCT:      { label: t('history.type.ADMIN_DEDUCT', 'Déduction admin'),   icon: Award,         color: 'text-red-400',    bg: 'bg-red-500/10' },
+  };
+
+  const TABS_CONFIG = [
+    { id: 'all',      label: t('history.tab_all', 'Tous'),         filter: undefined },
+    { id: 'received', label: t('history.tab_received', 'Reçus'),   filter: 'TRANSFER_RECEIVED' },
+    { id: 'sent',     label: t('history.tab_sent', 'Envoyés'),     filter: 'TRANSFER_SENT' },
+    { id: 'bonus',    label: t('history.tab_bonus', 'Bonus'),      filter: 'DAILY_BONUS' },
+    { id: 'buys',     label: t('history.tab_buys', 'Achats'),      filter: 'PURCHASE' },
+  ];
+  const currentFilter = TABS_CONFIG.find(tc => tc.id === tab)?.filter;
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['coins-transactions', tab, page],
     queryFn: () => coinsApi.getTransactions({
-      type: TYPE_FILTERS[tab],
+      type: currentFilter,
       page,
       limit: LIMIT,
     }),
@@ -85,16 +86,16 @@ export default function HistoryPage() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-white">Historique</h1>
-        <p className="text-gray-400 text-sm mt-0.5">Toutes vos transactions de Coins.</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">{t('history.title', 'Historique')}</h1>
+        <p className="text-gray-400 text-sm mt-0.5">{t('history.subtitle', 'Toutes vos transactions de Coins.')}</p>
       </div>
 
       {/* Stats summary */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
-          { icon: TrendingUp,   label: 'Total reçu',   value: `+${totalIn.toLocaleString('fr-FR')}`,  color: 'text-green-400', bg: 'bg-green-500/10' },
-          { icon: TrendingDown, label: 'Total envoyé', value: `-${totalOut.toLocaleString('fr-FR')}`, color: 'text-red-400',   bg: 'bg-red-500/10' },
-          { icon: Coins,        label: 'Opérations',   value: total.toLocaleString('fr-FR'),          color: 'text-purple-400',bg: 'bg-purple-500/10' },
+          { icon: TrendingUp,   label: t('history.total_in', 'Total reçu'),   value: `+${totalIn.toLocaleString('fr-FR')}`,  color: 'text-green-400', bg: 'bg-green-500/10' },
+          { icon: TrendingDown, label: t('history.total_out', 'Total envoyé'), value: `-${totalOut.toLocaleString('fr-FR')}`, color: 'text-red-400',   bg: 'bg-red-500/10' },
+          { icon: Coins,        label: t('history.operations', 'Opérations'),  value: total.toLocaleString('fr-FR'),          color: 'text-purple-400',bg: 'bg-purple-500/10' },
         ].map(s => (
           <div key={s.label} className={`${s.bg} border border-white/5 rounded-xl p-3`}>
             <div className="flex items-center gap-2 mb-1">
@@ -110,16 +111,16 @@ export default function HistoryPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         {/* Tab filter */}
         <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
-          {TABS.map(t => (
+          {TABS_CONFIG.map(tc => (
             <button
-              key={t}
-              onClick={() => { setTab(t); setPage(1); }}
+              key={tc.id}
+              onClick={() => { setTab(tc.id); setPage(1); }}
               className={cn(
                 'px-3 py-1.5 rounded-lg text-xs sm:text-sm whitespace-nowrap transition-colors flex-shrink-0',
-                tab === t ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                tab === tc.id ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
               )}
             >
-              {t}
+              {tc.label}
             </button>
           ))}
         </div>
@@ -129,7 +130,7 @@ export default function HistoryPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
           <input
             className="input-field w-full pl-8 text-sm"
-            placeholder="Rechercher..."
+            placeholder={t('history.search_ph', 'Rechercher...')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -145,9 +146,9 @@ export default function HistoryPage() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
             <Coins className="w-12 h-12 text-gray-700 mx-auto mb-3 opacity-40" />
-            <p className="text-gray-400 text-sm">Aucune transaction trouvée</p>
+            <p className="text-gray-400 text-sm">{t('history.no_tx', 'Aucune transaction trouvée')}</p>
             <p className="text-gray-600 text-xs mt-1">
-              {tab !== 'Tous' ? 'Essayez l\'onglet "Tous"' : 'Vos transactions apparaîtront ici'}
+              {tab !== 'all' ? t('history.try_all', 'Essayez l\'onglet "Tous"') : t('history.no_tx_sub', 'Vos transactions apparaîtront ici')}
             </p>
           </div>
         ) : (
@@ -210,7 +211,7 @@ export default function HistoryPage() {
         {!isLoading && totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-white/5">
             <span className="text-xs text-gray-500">
-              {total} transaction{total > 1 ? 's' : ''} · page {page}/{totalPages}
+              {total} {total > 1 ? t('history.txs_label', 'transactions') : t('history.tx_label', 'transaction')} · {t('history.page', 'page')} {page}/{totalPages}
             </span>
             <div className="flex items-center gap-2">
               <button

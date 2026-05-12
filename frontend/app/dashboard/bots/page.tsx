@@ -10,20 +10,22 @@ import {
 } from 'lucide-react';
 import { botsApi } from '@/lib/api';
 import toast from 'react-hot-toast';
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
-  running: { label: 'En ligne', color: 'text-green-400', dot: 'bg-green-500' },
-  stopped: { label: 'Arrêté', color: 'text-red-400', dot: 'bg-red-500' },
-  starting: { label: 'Démarrage', color: 'text-yellow-400', dot: 'bg-yellow-500' },
-  error: { label: 'Erreur', color: 'text-red-400', dot: 'bg-red-500' },
-};
+import { useSettings } from '@/lib/settingsContext';
 
 export default function BotsPage() {
   const { data: session } = useSession();
+  const { t } = useSettings();
   const user = session?.user as any;
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
+    running: { label: t('bots.status.running', 'En ligne'), color: 'text-green-400', dot: 'bg-green-500' },
+    stopped: { label: t('bots.status.stopped', 'Arrêté'), color: 'text-red-400', dot: 'bg-red-500' },
+    starting: { label: t('bots.status.starting', 'Démarrage'), color: 'text-yellow-400', dot: 'bg-yellow-500' },
+    error: { label: t('bots.status.error', 'Erreur'), color: 'text-red-400', dot: 'bg-red-500' },
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['bots'],
@@ -36,25 +38,25 @@ export default function BotsPage() {
 
   const startMutation = useMutation({
     mutationFn: (id: string) => botsApi.start(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success('Bot démarré !'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success(t('bots.started', 'Bot démarré !')); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const stopMutation = useMutation({
     mutationFn: (id: string) => botsApi.stop(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success('Bot arrêté.'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success(t('bots.stopped_msg', 'Bot arrêté.')); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const restartMutation = useMutation({
     mutationFn: (id: string) => botsApi.restart(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success('Bot redémarré !'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success(t('bots.restarted', 'Bot redémarré !')); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => botsApi.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success('Bot supprimé.'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success(t('bots.deleted', 'Bot supprimé.')); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -71,22 +73,22 @@ export default function BotsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Mes Bots</h1>
-          <p className="text-gray-400 text-sm mt-1">Gérez vos bots déployés</p>
+          <h1 className="text-2xl font-bold text-white">{t('bots.title', 'Mes Bots')}</h1>
+          <p className="text-gray-400 text-sm mt-1">{t('bots.subtitle', 'Gérez vos bots déployés')}</p>
         </div>
         <a href="/dashboard/bots/deploy" className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" />
-          Déployer un bot
+          {t('bots.deploy_btn', 'Déployer un bot')}
         </a>
       </div>
 
       {/* Summary cards — from real data */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Bots actifs', value: running, dot: 'bg-green-400', color: 'text-green-400' },
-          { label: 'Bots arrêtés', value: stopped, dot: 'bg-red-400', color: 'text-red-400' },
-          { label: 'En démarrage', value: starting, dot: 'bg-yellow-400', color: 'text-yellow-400' },
-          { label: 'Coins / jour', value: totalCoins, dot: 'bg-amber-400', color: 'text-amber-400' },
+          { label: t('bots.active', 'Bots actifs'), value: running, dot: 'bg-green-400', color: 'text-green-400' },
+          { label: t('bots.stopped', 'Bots arrêtés'), value: stopped, dot: 'bg-red-400', color: 'text-red-400' },
+          { label: t('bots.starting', 'En démarrage'), value: starting, dot: 'bg-yellow-400', color: 'text-yellow-400' },
+          { label: t('bots.daily_cost', 'Coins / jour'), value: totalCoins, dot: 'bg-amber-400', color: 'text-amber-400' },
         ].map((s) => (
           <div key={s.label} className="bg-[#111118] border border-white/5 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -103,7 +105,7 @@ export default function BotsPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
         <input
           className="input-field pl-9"
-          placeholder="Rechercher un bot..."
+          placeholder={t('bots.search_ph', 'Rechercher un bot...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -117,11 +119,11 @@ export default function BotsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
           <Bot className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-white mb-2">Aucun bot trouvé</h3>
-          <p className="text-gray-400 text-sm mb-6">Déployez votre premier bot pour commencer.</p>
+          <h3 className="text-lg font-medium text-white mb-2">{t('bots.not_found', 'Aucun bot trouvé')}</h3>
+          <p className="text-gray-400 text-sm mb-6">{t('bots.not_found_sub', 'Déployez votre premier bot pour commencer.')}</p>
           <a href="/dashboard/bots/deploy" className="btn-primary inline-flex items-center gap-2">
             <Zap className="w-4 h-4" />
-            Déployer mon premier bot
+            {t('bots.deploy_first', 'Déployer mon premier bot')}
           </a>
         </div>
       ) : (
@@ -200,7 +202,7 @@ export default function BotsPage() {
                       <Terminal className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => { if (confirm('Supprimer ce bot ?')) deleteMutation.mutate(bot.id); }}
+                      onClick={() => { if (confirm(t('bots.delete_confirm', 'Supprimer ce bot ?'))) deleteMutation.mutate(bot.id); }}
                       className="w-8 h-8 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-colors"
                       title="Supprimer"
                     >
@@ -226,7 +228,7 @@ export default function BotsPage() {
                     </div>
                   </div>
                   <div className="bg-[#1A1A24] rounded-lg p-3">
-                    <div className="text-xs text-gray-400 mb-1">Redémarrages</div>
+                    <div className="text-xs text-gray-400 mb-1">{t('bots.restarts', 'Redémarrages')}</div>
                     <div className="text-sm font-medium text-white">{bot.restarts ?? 0}</div>
                   </div>
                 </div>
@@ -265,7 +267,7 @@ function BotLogs({ botId }: { botId: string }) {
     <div className="bg-[#0D0D14] p-4">
       <div className="flex items-center gap-2 mb-3">
         <Terminal className="w-3.5 h-3.5 text-green-400" />
-        <span className="text-xs text-green-400 font-mono">Logs en temps réel</span>
+        <span className="text-xs text-green-400 font-mono">{/* logs label shown via BotLogs - static */}Logs</span>
         {isLoading && <Loader2 className="w-3 h-3 text-gray-500 animate-spin ml-auto" />}
       </div>
       <div className="font-mono text-xs text-green-400 space-y-1 h-32 overflow-y-auto scrollbar-thin">
