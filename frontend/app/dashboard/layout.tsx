@@ -53,19 +53,25 @@ function CoinIcon({ className = 'w-5 h-5' }: { className?: string }) {
 }
 
 // ─── Nav items with translation keys ─────────────────────────────
-const NAV_ITEMS = [
-  { href: '/dashboard',              icon: LayoutDashboard, key: 'nav.dashboard' },
-  { href: '/dashboard/coins',        icon: Wallet,          key: 'nav.coins' },
-  { href: '/dashboard/bots',         icon: Bot,             key: 'nav.bots' },
-  { href: '/dashboard/servers',      icon: Server,          key: 'nav.servers' },
-  { href: '/dashboard/coins/share',  icon: Share2,          key: 'nav.share' },
-  { href: '/dashboard/community',    icon: MessageSquare,   key: 'nav.community' },
-  { href: '/developer',              icon: Code,            key: 'Développeur' },
-  { href: '/dashboard/history',      icon: History,         key: 'Historique' },
-  { href: '/dashboard/settings',     icon: Settings,        key: 'nav.settings' },
-  { href: '/dashboard/profile',      icon: User,            key: 'nav.profile' },
-  { href: '/dashboard/support',      icon: HelpCircle,      key: 'nav.support' },
+const BASE_NAV_ITEMS = [
+  { href: '/dashboard',              icon: LayoutDashboard, key: 'nav.dashboard', devOnly: false },
+  { href: '/dashboard/coins',        icon: Wallet,          key: 'nav.coins',     devOnly: false },
+  { href: '/dashboard/bots',         icon: Bot,             key: 'nav.bots',      devOnly: false },
+  { href: '/dashboard/servers',      icon: Server,          key: 'nav.servers',   devOnly: false },
+  { href: '/dashboard/coins/share',  icon: Share2,          key: 'nav.share',     devOnly: false },
+  { href: '/dashboard/community',    icon: MessageSquare,   key: 'nav.community', devOnly: false },
+  { href: '/developer',              icon: Code,            key: 'Développeur',   devOnly: true },
+  { href: '/dashboard/history',      icon: History,         key: 'Historique',    devOnly: false },
+  { href: '/dashboard/settings',     icon: Settings,        key: 'nav.settings',  devOnly: false },
+  { href: '/dashboard/profile',      icon: User,            key: 'nav.profile',   devOnly: false },
+  { href: '/dashboard/support',      icon: HelpCircle,      key: 'nav.support',   devOnly: false },
 ];
+
+const DEV_ROLES = ['DEVELOPER', 'ADMIN', 'SUPERADMIN'];
+
+function getNavItems(role?: string) {
+  return BASE_NAV_ITEMS.filter(item => !item.devOnly || DEV_ROLES.includes(role || ''));
+}
 
 // ─── Bouton toggle FR/EN ─────────────────────────────────────────
 function LangToggle() {
@@ -230,7 +236,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5 scrollbar-thin">
-          {NAV_ITEMS.map((item) => {
+          {getNavItems(user?.role).map((item) => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
             return (
               <Link
@@ -395,11 +401,11 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                       <div className="text-xs text-gray-400 truncate">{user?.email}</div>
                     </div>
                     {[
-                      { href: '/dashboard/profile', icon: User,     key: 'nav.profile' },
-                      { href: '/dashboard/settings', icon: Settings, key: 'nav.settings' },
-                      { href: '/dashboard/coins',    icon: Wallet,   key: 'nav.coins' },
-                      { href: '/developer',          icon: Code,     key: 'Espace Développeur' },
-                    ].map(item => (
+                      { href: '/dashboard/profile', icon: User,     key: 'nav.profile',         devOnly: false },
+                      { href: '/dashboard/settings', icon: Settings, key: 'nav.settings',        devOnly: false },
+                      { href: '/dashboard/coins',    icon: Wallet,   key: 'nav.coins',           devOnly: false },
+                      { href: '/developer',          icon: Code,     key: 'Espace Développeur',  devOnly: true },
+                    ].filter(item => !item.devOnly || DEV_ROLES.includes(user?.role || '')).map(item => (
                       <Link key={item.href} href={item.href} onClick={() => setProfileOpen(false)}
                         className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors">
                         <item.icon className="w-4 h-4 text-gray-500" />

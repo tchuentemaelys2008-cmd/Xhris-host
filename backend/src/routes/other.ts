@@ -350,6 +350,104 @@ paymentsRouter.post('/fapshi/initiate', async (req: AuthRequest, res: Response) 
   } catch (err) { sendError(res, 'Erreur lors de l\'initiation Fapshi', 500); }
 });
 
+// POST /api/payments/geniuspay/initiate — GeniusPay checkout
+paymentsRouter.post('/geniuspay/initiate', async (req: AuthRequest, res: Response) => {
+  try {
+    const { packId, coins, amount, currency = 'XOF', description, successUrl, errorUrl } = req.body;
+    if (!packId || !coins || !amount) return sendError(res, 'Paramètres manquants', 400);
+
+    const GP_PUBLIC_KEY = process.env.GENIUSPAY_PUBLIC_KEY || '';
+    const GP_SECRET_KEY = process.env.GENIUSPAY_SECRET_KEY || '';
+    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    await prisma.payment.create({
+      data: { userId: req.user!.id, amount, method: 'GENIUSPAY' as any, reference, packId, status: 'PENDING' },
+    });
+
+    if (GP_PUBLIC_KEY && GP_SECRET_KEY) {
+      const gpRes = await fetch('https://pay.genius.ci/api/v1/merchant/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': GP_PUBLIC_KEY,
+          'X-API-Secret': GP_SECRET_KEY,
+        },
+        body: JSON.stringify({
+          amount,
+          currency,
+          description: description || `XHRIS Host - ${coins} Coins (${packId})`,
+          customer: { name: req.user!.name, email: req.user!.email },
+          metadata: { order_id: reference, pack_id: packId, coins, user_id: req.user!.id },
+          success_url: successUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?success=1&ref=${reference}`,
+          error_url: errorUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?error=1&ref=${reference}`,
+        }),
+      });
+      const gpData: any = await gpRes.json();
+      if (!gpRes.ok) return sendError(res, gpData?.error?.message || 'Erreur GeniusPay', 400);
+
+      sendSuccess(res, {
+        reference,
+        checkoutUrl: gpData.data?.checkout_url,
+        paymentUrl: gpData.data?.payment_url,
+        gpReference: gpData.data?.reference,
+      }, 'Paiement GeniusPay initié');
+    } else {
+      sendSuccess(res, { reference, checkoutUrl: null }, 'GeniusPay non configuré — mode dev');
+    }
+  } catch (err) { sendError(res, 'Erreur GeniusPay', 500); }
+});
+
+// POST /api/payments/geniuspay/webhook — Receive GeniusPay webhook (no auth)
+paymentsRouter.post('/geniuspay/webhook', async (req: any, res: Response) => {
+  try {
+    const signature = req.headers['x-webhook-signature'] as string;
+    const timestamp = req.headers['x-webhook-timestamp'] as string;
+    const event = req.headers['x-webhook-event'] as string;
+    const webhookSecret = process.env.GENIUSPAY_WEBHOOK_SECRET || '';
+
+    // Verify signature
+    if (webhookSecret && signature && timestamp) {
+      const { createHmac } = await import('crypto');
+      const data = `${timestamp}.${JSON.stringify(req.body)}`;
+      const expected = createHmac('sha256', webhookSecret).update(data).digest('hex');
+      if (expected !== signature) {
+        return res.status(401).json({ success: false, message: 'Signature invalide' });
+      }
+      // Replay attack protection (5 min)
+      if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
+        return res.status(400).json({ success: false, message: 'Timestamp expiré' });
+      }
+    }
+
+    const payload = req.body;
+    const gpRef = payload?.data?.metadata?.order_id as string | undefined;
+
+    if (event === 'payment.success' && gpRef) {
+      const payment = await prisma.payment.findUnique({ where: { reference: gpRef } });
+      if (payment && payment.status === 'PENDING') {
+        const coinsToCredit = Number(payload?.data?.metadata?.coins) || 0;
+        await prisma.$transaction([
+          prisma.payment.update({ where: { reference: gpRef }, data: { status: 'COMPLETED' } }),
+          ...(coinsToCredit > 0 ? [
+            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coinsToCredit } } }),
+            prisma.transaction.create({
+              data: {
+                userId: payment.userId,
+                type: 'PURCHASE' as any,
+                amount: coinsToCredit,
+                description: `Achat ${coinsToCredit} coins via GeniusPay`,
+                reference: gpRef,
+              },
+            }),
+          ] : []),
+        ]);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false }); }
+});
+
 paymentsRouter.get('/verify/:reference', async (req: AuthRequest, res: Response) => {
   try {
     const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });

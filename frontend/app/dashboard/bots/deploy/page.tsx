@@ -5,9 +5,50 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Bot, Copy, Zap, ArrowLeft, Loader2, CheckCircle } from 'lucide-react';
+import { Bot, Copy, Zap, ArrowLeft, Loader2, CheckCircle, MessageCircle, Plus } from 'lucide-react';
 import { marketplaceApi, botsApi } from '@/lib/api';
 import toast from 'react-hot-toast';
+
+function AddBotRequestBanner({ user }: { user: any }) {
+  const handleSendRequest = () => {
+    const msg = encodeURIComponent(
+      `Bonjour ! Je suis développeur sur XHRIS Host et je souhaite ajouter mon bot sur la marketplace.\n\n📧 Email: ${user?.email || 'N/A'}\n👤 Username: ${user?.name || 'N/A'}\n\nMerci de me contacter pour la suite du processus.`
+    );
+    // Replace with your WhatsApp business number (format: country code + number, no +)
+    window.open(`https://wa.me/237670000000?text=${msg}`, '_blank');
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-gradient-to-r from-purple-600/10 to-blue-600/10 border border-purple-500/20 rounded-xl p-4"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Plus className="w-4 h-4 text-purple-400" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-white mb-0.5">
+              Voulez-vous ajouter un bot ?
+            </p>
+            <p className="text-xs text-gray-400">
+              Vous êtes développeur ? Soumettez votre bot pour qu&apos;il soit publié sur la marketplace.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleSendRequest}
+          className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-2 rounded-lg transition-colors flex-shrink-0 font-medium"
+        >
+          <MessageCircle className="w-3.5 h-3.5" />
+          Oui, contacter
+        </button>
+      </div>
+    </motion.div>
+  );
+}
 
 export default function DeployBotPage() {
   const { data: session } = useSession();
@@ -40,6 +81,8 @@ export default function DeployBotPage() {
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
+      <AddBotRequestBanner user={user} />
+
       <div className="flex items-center gap-3">
         <button onClick={() => router.back()} className="p-2 hover:bg-white/5 rounded-lg transition-colors">
           <ArrowLeft className="w-4 h-4 text-gray-400" />

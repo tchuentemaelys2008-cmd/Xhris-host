@@ -54,13 +54,13 @@ const PAYMENT_METHODS = [
   {
     id: 'geniuspay',
     label: 'Genius Pay',
-    desc: 'Envoi manuel · Afrique francophone',
+    desc: 'Paiement automatique · Afrique francophone',
     flag: '🌍',
     color: 'border-yellow-500/40 hover:bg-yellow-500/5',
     accent: 'text-yellow-400',
-    auto: false,
-    appStore: 'https://apps.apple.com/search?term=genius+pay',
-    playStore: 'https://play.google.com/store/search?q=genius+pay',
+    auto: true,
+    appStore: null,
+    playStore: null,
   },
   {
     id: 'europe',
@@ -114,6 +114,26 @@ export default function BuyCoinsPage() {
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur Fapshi — réessayez'),
   });
 
+  // GeniusPay: automatic checkout
+  const geniusPayMutation = useMutation({
+    mutationFn: () => apiClient.post('/payments/geniuspay/initiate', {
+      packId: selectedPack.id,
+      coins: selectedPack.coins,
+      amount: Math.round(selectedPack.price * currency.rate),
+      currency: currency.code,
+      description: `XHRIS Host — ${selectedPack.coins} Coins`,
+    }),
+    onSuccess: (res: any) => {
+      const checkoutUrl = res?.data?.data?.checkoutUrl || res?.data?.data?.paymentUrl;
+      if (checkoutUrl) {
+        window.open(checkoutUrl, '_blank');
+        toast.success('Redirection vers GeniusPay...');
+      }
+      setStep('success');
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur GeniusPay — réessayez'),
+  });
+
   // Manual payment: upload screenshot + send to WhatsApp
   const sendManual = async () => {
     if (!screenshot) { toast.error('Veuillez joindre votre capture de paiement'); return; }
@@ -156,6 +176,7 @@ export default function BuyCoinsPage() {
 
   const method = selectedMethod;
   const isFapshi = method?.id === 'fapshi';
+  const isGeniusPay = method?.id === 'geniuspay';
   const isEurope = method?.id === 'europe';
   const stepIdx = ['packs', 'method', 'pay'].indexOf(step);
 
@@ -334,8 +355,45 @@ export default function BuyCoinsPage() {
             </>
           )}
 
-          {/* ── MANUAL (MiniPay / GeniusPay / Europe) ── */}
-          {!isFapshi && (
+          {/* ── GENIUSPAY: automatic checkout ── */}
+          {isGeniusPay && (
+            <div className="space-y-4">
+              <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-5 text-center">
+                <div className="text-3xl mb-2">💳</div>
+                <h3 className="text-base font-semibold text-white mb-1">GeniusPay Checkout</h3>
+                <p className="text-xs text-gray-400 mb-4">
+                  Vous serez redirigé vers la page de paiement sécurisée GeniusPay. Choisissez Wave, Orange Money, MTN ou carte bancaire.
+                </p>
+                <div className="flex flex-wrap justify-center gap-2 mb-4">
+                  {['Wave', 'Orange Money', 'MTN MoMo', 'Carte'].map(op => (
+                    <span key={op} className="text-xs bg-white/5 border border-white/10 rounded-full px-3 py-1 text-gray-300">{op}</span>
+                  ))}
+                </div>
+                <div className="bg-[#1A1A24] rounded-lg p-3 flex items-center justify-between mb-4">
+                  <span className="text-xs text-gray-400">Montant à payer</span>
+                  <span className="text-yellow-400 font-bold">{formatAmount(selectedPack.price, currency)}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => geniusPayMutation.mutate()}
+                disabled={geniusPayMutation.isPending}
+                className="btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {geniusPayMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <><Coins className="w-4 h-4" /> Payer {formatAmount(selectedPack.price, currency)} avec GeniusPay</>
+                )}
+              </button>
+              <div className="bg-white/5 rounded-xl p-3 flex items-start gap-2">
+                <Shield className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-400">Paiement sécurisé. Coins crédités automatiquement après confirmation.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── MANUAL (MiniPay / Europe) ── */}
+          {!isFapshi && !isGeniusPay && (
             <>
               {/* App download links */}
               {(method.appStore || method.playStore) && (
@@ -414,8 +472,8 @@ export default function BuyCoinsPage() {
           <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-10 h-10 text-green-400" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">{isFapshi ? 'Paiement initié !' : 'Demande envoyée !'}</h2>
-          <p className="text-gray-400 mb-1">{isFapshi ? 'Complétez le paiement sur Fapshi. Vos Coins seront crédités automatiquement.' : 'Notre équipe va vérifier votre paiement sous 24h.'}</p>
+          <h2 className="text-2xl font-bold text-white mb-2">{(isFapshi || isGeniusPay) ? 'Paiement initié !' : 'Demande envoyée !'}</h2>
+          <p className="text-gray-400 mb-1">{isFapshi ? 'Complétez le paiement sur Fapshi. Vos Coins seront crédités automatiquement.' : isGeniusPay ? 'Complétez le paiement sur GeniusPay. Vos Coins seront crédités automatiquement.' : 'Notre équipe va vérifier votre paiement sous 24h.'}</p>
           <p className="text-amber-400 font-bold text-xl my-4">+{selectedPack.coins.toLocaleString()} Coins en attente</p>
           <div className="flex gap-3 justify-center">
             <Link href="/dashboard" className="btn-primary">Retour au dashboard</Link>

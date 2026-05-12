@@ -8,24 +8,37 @@ import { Toaster } from 'react-hot-toast';
 import '../styles/globals.css';
 
 export const metadata: Metadata = {
-  title: { default: 'XHRIS Host — Bot & Cloud Hosting Platform', template: '%s | XHRIS Host' },
-  description: 'Deploy WhatsApp bots, manage cloud servers, and grow your SaaS with XHRIS Host. The all-in-one platform for developers.',
-  keywords: ['whatsapp bot', 'cloud hosting', 'bot deploy', 'vps panel', 'saas platform'],
-  authors: [{ name: 'XHRIS Host Team' }],
+  title: { default: 'XHRIS Host — Hébergement Bot WhatsApp & Serveurs Cloud', template: '%s | XHRIS Host' },
+  description: 'Déployez vos bots WhatsApp, gérez vos serveurs cloud et développez votre SaaS avec XHRIS Host. La plateforme tout-en-un pour développeurs africains.',
+  keywords: [
+    'whatsapp bot', 'hébergement bot', 'cloud hosting', 'bot deploy', 'vps panel', 'saas platform',
+    'bot whatsapp cameroun', 'hébergement whatsapp', 'marketplace bot', 'terminal vps', 'xhris host',
+    'bot hosting africa', 'serveur cloud', 'wave payment', 'orange money', 'mtn momo',
+  ],
+  authors: [{ name: 'XHRIS Host', url: 'https://xhrisfolio.vercel.app' }],
   creator: 'XHRIS Host',
+  publisher: 'XHRIS Host',
+  metadataBase: new URL('https://xhris.host'),
+  alternates: { canonical: 'https://xhris.host' },
   openGraph: {
     type: 'website',
     locale: 'fr_CM',
     url: 'https://xhris.host',
-    title: 'XHRIS Host — Bot & Cloud Hosting Platform',
-    description: 'Deploy WhatsApp bots and manage cloud servers with ease.',
+    title: 'XHRIS Host — Hébergement Bot WhatsApp & Serveurs Cloud',
+    description: 'Déployez vos bots WhatsApp et gérez vos serveurs cloud en quelques clics. 10 coins offerts à l\'inscription.',
     siteName: 'XHRIS Host',
-    images: [{ url: '/og-image.png', width: 1200, height: 630 }],
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'XHRIS Host Platform' }],
   },
-  twitter: { card: 'summary_large_image', title: 'XHRIS Host', description: 'Deploy WhatsApp bots and cloud servers.' },
-  robots: { index: true, follow: true },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'XHRIS Host — Bot WhatsApp & Cloud',
+    description: 'Déployez vos bots WhatsApp et serveurs cloud. Plateforme SaaS tout-en-un.',
+    images: ['/og-image.png'],
+  },
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   manifest: '/manifest.json',
   icons: { icon: '/favicon.ico', apple: '/apple-icon.png' },
+  verification: { google: process.env.GOOGLE_SITE_VERIFICATION || '' },
 };
 
 export const viewport: Viewport = {
