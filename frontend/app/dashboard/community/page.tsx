@@ -452,12 +452,12 @@ export default function CommunityPage() {
               <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#0A0A0F]" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-gray-300 truncate">{u.name}</div>
               {u.role && ROLE_BADGE[u.role] && (
                 <span className={cn('text-[9px] px-1 py-0.5 rounded border', ROLE_BADGE[u.role].color)}>
                   {ROLE_BADGE[u.role].label}
                 </span>
               )}
+              <div className="text-xs text-gray-300 truncate mt-0.5">{u.name}</div>
             </div>
             <AtSign className="w-3 h-3 text-gray-600 flex-shrink-0" />
           </button>
