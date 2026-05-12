@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { signOut } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
+import { useSettings } from '@/lib/settingsContext';
 
 const TABS = [
   { id: 'general', label: 'Général', icon: Settings },
@@ -37,6 +38,7 @@ export default function SettingsPage() {
   const { data: session } = useSession();
   const qc = useQueryClient();
   const user = session?.user as any;
+  const { setLanguage: applyLanguage, setTheme: applyTheme, setCurrency: applyCurrency, setTimezone: applyTimezone, t, language: currentLang } = useSettings();
   const [tab, setTab] = useState('general');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
@@ -181,15 +183,19 @@ export default function SettingsPage() {
           </div>
 
           <div className="bg-[#111118] border border-white/5 rounded-xl p-6 space-y-5">
-            <h3 className="font-semibold text-white">Langue & Région</h3>
+            <h3 className="font-semibold text-white">{t('settings.language', 'Langue & Région')}</h3>
 
             <div>
-              <label className="text-xs text-gray-400 mb-2 block">Langue de l&apos;interface</label>
+              <label className="text-xs text-gray-400 mb-2 block">{t('settings.language', 'Langue de l\'interface')}</label>
               <div className="grid grid-cols-3 gap-2">
                 {LANGUAGES.map(lang => (
                   <button
                     key={lang.code}
-                    onClick={() => setSettings(s => ({ ...s, language: lang.code }))}
+                    onClick={async () => {
+                      setSettings(s => ({ ...s, language: lang.code }));
+                      await applyLanguage(lang.code as any);
+                      toast.success(lang.code === 'en' ? 'Language changed to English!' : 'Langue changée en Français !', { duration: 4000 });
+                    }}
                     className={cn('flex items-center gap-2 p-3 rounded-lg border transition-all text-sm',
                       settings.language === lang.code
                         ? 'border-purple-500 bg-purple-500/10 text-white'
@@ -203,22 +209,28 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="text-xs text-gray-400 mb-1.5 block">Fuseau horaire</label>
+              <label className="text-xs text-gray-400 mb-1.5 block">{t('settings.timezone', 'Fuseau horaire')}</label>
               <select
                 className="input-field w-full"
                 value={settings.timezone}
-                onChange={e => setSettings(s => ({ ...s, timezone: e.target.value }))}
+                onChange={async e => {
+                  setSettings(s => ({ ...s, timezone: e.target.value }));
+                  await applyTimezone(e.target.value);
+                }}
               >
                 {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="text-xs text-gray-400 mb-1.5 block">Devise</label>
+              <label className="text-xs text-gray-400 mb-1.5 block">{t('settings.currency', 'Devise')}</label>
               <select
                 className="input-field w-full sm:w-48"
                 value={settings.currency}
-                onChange={e => setSettings(s => ({ ...s, currency: e.target.value }))}
+                onChange={async e => {
+                  setSettings(s => ({ ...s, currency: e.target.value }));
+                  await applyCurrency(e.target.value);
+                }}
               >
                 <option value="EUR">EUR (€)</option>
                 <option value="USD">USD ($)</option>
@@ -231,19 +243,22 @@ export default function SettingsPage() {
               <label className="text-xs text-gray-400 mb-2 block">Thème</label>
               <div className="flex gap-2">
                 {[
-                  { value: 'dark', label: 'Sombre', icon: Moon },
-                  { value: 'light', label: 'Clair', icon: Sun },
-                ].map(t => (
+                  { value: 'dark',  label: t('settings.theme_dark',  'Sombre'), icon: Moon },
+                  { value: 'light', label: t('settings.theme_light', 'Clair'),  icon: Sun },
+                ].map(th => (
                   <button
-                    key={t.value}
-                    onClick={() => setSettings(s => ({ ...s, theme: t.value }))}
+                    key={th.value}
+                    onClick={async () => {
+                      setSettings(s => ({ ...s, theme: th.value }));
+                      await applyTheme(th.value);
+                    }}
                     className={cn('flex items-center gap-2 px-4 py-2 rounded-lg border text-sm transition-all',
-                      settings.theme === t.value
+                      settings.theme === th.value
                         ? 'border-purple-500 bg-purple-500/10 text-purple-400'
                         : 'border-white/5 bg-white/5 text-gray-400 hover:border-white/15')}
                   >
-                    <t.icon className="w-4 h-4" />
-                    {t.label}
+                    <th.icon className="w-4 h-4" />
+                    {th.label}
                   </button>
                 ))}
               </div>

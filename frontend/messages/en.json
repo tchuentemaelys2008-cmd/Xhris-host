@@ -1,47 +1,61 @@
 {
-  "nav": {
-    "features": "Features",
-    "pricing": "Pricing",
-    "marketplace": "Marketplace",
-    "docs": "Docs",
-    "login": "Sign In",
-    "register": "Get Started"
-  },
-  "hero": {
-    "badge": "Next-generation SaaS platform",
-    "title1": "Host your",
-    "title2": "WhatsApp Bots",
-    "title3": "& Cloud Servers",
-    "subtitle": "Deploy, manage and monetize your WhatsApp bots in a few clicks. All-in-one panel with live terminal, monitoring and marketplace.",
-    "cta": "Start for free",
-    "demo": "Watch demo"
-  },
-  "stats": {
-    "users": "Active users",
-    "bots": "Deployed bots",
-    "servers": "Active servers",
-    "uptime": "Guaranteed uptime"
-  },
-  "features": {
-    "title": "Everything you need",
-    "subtitle": "A complete platform to host, manage and scale your projects."
-  },
-  "pricing": {
-    "title": "Simple and transparent pricing",
-    "subtitle": "Start for free. Scale as you grow."
-  },
-  "testimonials": {
-    "title": "What our users say"
-  },
-  "cta": {
-    "title": "Ready to get started?",
-    "subtitle": "Join over 12,000 developers who trust XHRIS Host. Start for free with 10 coins.",
-    "button": "Create my account for free"
-  },
-  "footer": {
-    "rights": "All rights reserved.",
-    "terms": "Terms of Service",
-    "privacy": "Privacy Policy",
-    "contact": "Contact"
-  }
+  "nav.dashboard": "Dashboard",
+  "nav.coins": "Manage Coins",
+  "nav.bots": "My Bots",
+  "nav.servers": "Servers",
+  "nav.share": "Share Coins",
+  "nav.community": "Community",
+  "nav.settings": "Settings",
+  "nav.profile": "Profile",
+  "nav.support": "Support",
+  "nav.logout": "Sign out",
+  "dashboard.welcome": "Welcome,",
+  "dashboard.subtitle": "Manage your bots, servers and credits from your dashboard.",
+  "dashboard.claim_bonus": "Claim +3 Coins",
+  "dashboard.bonus_claimed": "Bonus claimed",
+  "dashboard.coins": "Current Coins",
+  "dashboard.deployments": "Remaining Deployments",
+  "dashboard.active_servers": "Active Servers",
+  "dashboard.status": "Current status",
+  "dashboard.deploy_bot": "Deploy a Bot",
+  "dashboard.deploy_sub": "Choose a bot, configure your variables and deploy in a few clicks.",
+  "dashboard.create_server": "Create a Server",
+  "dashboard.history": "Recent history",
+  "dashboard.referral": "Referral",
+  "dashboard.news": "News",
+  "dashboard.see_all": "See full history",
+  "settings.title": "Settings",
+  "settings.subtitle": "Configure your XHRIS Host experience.",
+  "settings.general": "General",
+  "settings.notifications": "Notifications",
+  "settings.privacy": "Privacy",
+  "settings.account": "Account",
+  "settings.language": "Interface language",
+  "settings.timezone": "Timezone",
+  "settings.currency": "Currency",
+  "settings.theme": "Theme",
+  "settings.theme_dark": "Dark",
+  "settings.theme_light": "Light",
+  "settings.save": "Save changes",
+  "settings.username_title": "Change username",
+  "settings.username_placeholder": "New username",
+  "coins.balance": "Available balance",
+  "coins.send": "Send Coins",
+  "coins.recipient": "Recipient ID",
+  "coins.amount": "Amount",
+  "coins.fee": "Fee",
+  "coins.recent": "Recent recipients",
+  "profile.title": "My Profile",
+  "profile.username": "Username",
+  "profile.email": "Email address",
+  "profile.whatsapp": "WhatsApp (optional)",
+  "profile.location": "Location",
+  "profile.bio": "Bio",
+  "profile.save": "Save",
+  "support.title": "Support",
+  "support.help": "Help Center",
+  "support.tickets": "My tickets",
+  "support.news": "Announcements",
+  "support.open_ticket": "Open a ticket",
+  "community.title": "Community"
 }
