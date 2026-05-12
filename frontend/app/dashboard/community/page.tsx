@@ -13,6 +13,16 @@ import { communityApi, apiClient } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 
+const URL_REGEX = /(https?:\/\/[^\s<>"]+)/g;
+function linkify(text: string) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, i) =>
+    URL_REGEX.test(part)
+      ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-purple-400 underline hover:text-purple-300 break-all">{part}</a>
+      : part
+  );
+}
+
 const ROLE_BADGE: Record<string, { label: string; color: string }> = {
   SUPERADMIN: { label: 'Staff',       color: 'bg-red-500/20 text-red-400 border-red-500/30' },
   ADMIN:      { label: 'Admin',       color: 'bg-red-500/20 text-red-400 border-red-500/30' },
@@ -321,7 +331,7 @@ export default function CommunityPage() {
               {/* Message content */}
               {!msg.attachments?.length && (
                 <p className="text-sm text-gray-300 leading-relaxed break-words">
-                  {isReply ? mainContent : msg.content}
+                  {linkify(isReply ? mainContent : (msg.content || ''))}
                 </p>
               )}
 

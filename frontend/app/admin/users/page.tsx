@@ -33,7 +33,8 @@ export default function AdminUsersPage() {
   const [coinsReason, setCoinsReason] = useState('');
   const [banReason, setBanReason] = useState('');
   const [showModal, setShowModal] = useState<'ban' | 'coins' | 'edit' | 'create' | null>(null);
-  const [createForm, setCreateForm] = useState({ name: '', email: '', role: 'USER', plan: 'FREE' });
+  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'USER', plan: 'FREE', coins: '' });
+  const [editForm, setEditForm] = useState({ name: '', email: '', role: 'USER', plan: 'FREE', status: 'ACTIVE', coins: '' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-users', search, roleFilter, statusFilter, page],
@@ -52,7 +53,7 @@ export default function AdminUsersPage() {
   const users: any[] = _raw_users;
   const total: number = (data as any)?.data?.pagination?.total || (data as any)?.data?.total || users.length;
   const totalPages = Math.max(1, Math.ceil(total / 20));
-  const stats = (statsData as any)?.data || {};
+  const stats = (statsData as any)?.data?.data || {};
 
   const banMutation = useMutation({
     mutationFn: () => adminApi.banUser(actionUser.id, banReason),
@@ -71,14 +72,26 @@ export default function AdminUsersPage() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: () => apiClient.post('/admin/users', createForm),
+    mutationFn: () => apiClient.post('/admin/users', { ...createForm, coins: createForm.coins ? Number(createForm.coins) : undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-stats'] });
       setShowModal(null);
-      setCreateForm({ name: '', email: '', role: 'USER', plan: 'FREE' });
+      setCreateForm({ name: '', email: '', password: '', role: 'USER', plan: 'FREE', coins: '' });
       toast.success('Utilisateur créé avec succès', { duration: 5000 });
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la création'),
+  });
+
+  const editUserMutation = useMutation({
+    mutationFn: () => apiClient.patch(`/admin/users/${actionUser.id}`, { ...editForm, coins: editForm.coins !== '' ? Number(editForm.coins) : undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-stats'] });
+      setShowModal(null);
+      toast.success('Utilisateur modifié avec succès');
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
   });
 
   const pieData = [
@@ -204,7 +217,7 @@ export default function AdminUsersPage() {
                               <button className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white" title="Voir">
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => { setActionUser(u); setShowModal('edit'); }} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white" title="Modifier">
+                              <button onClick={() => { setActionUser(u); setEditForm({ name: u.name || '', email: u.email || '', role: u.role || 'USER', plan: u.plan || 'FREE', status: u.status || 'ACTIVE', coins: String(u.coins ?? '') }); setShowModal('edit'); }} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white" title="Modifier">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button onClick={() => { setActionUser(u); setShowModal('coins'); }} className="p-1.5 hover:bg-yellow-500/10 rounded-lg transition-colors text-gray-400 hover:text-yellow-400" title="Coins">
@@ -323,13 +336,23 @@ export default function AdminUsersPage() {
               <button onClick={() => setShowModal(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-400 mb-1.5 block">Nom *</label>
-                <input className="input-field w-full" placeholder="Nom complet" value={createForm.name} onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Nom *</label>
+                  <input className="input-field w-full" placeholder="Nom complet" value={createForm.name} onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Solde (Coins)</label>
+                  <input type="number" className="input-field w-full" placeholder="0" min="0" value={createForm.coins} onChange={e => setCreateForm(f => ({ ...f, coins: e.target.value }))} />
+                </div>
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1.5 block">Email *</label>
                 <input type="email" className="input-field w-full" placeholder="email@exemple.com" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Mot de passe *</label>
+                <input type="password" className="input-field w-full" placeholder="Mot de passe initial" value={createForm.password} onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -361,6 +384,70 @@ export default function AdminUsersPage() {
                 className="btn-primary flex-1 flex items-center justify-center gap-2"
               >
                 {createUserMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Créer'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Edit user modal */}
+      {showModal === 'edit' && actionUser && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Modifier {actionUser.name}</h3>
+              <button onClick={() => setShowModal(null)} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Nom</label>
+                  <input className="input-field w-full" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Solde (Coins)</label>
+                  <input type="number" className="input-field w-full" placeholder={String(actionUser.coins ?? 0)} value={editForm.coins} onChange={e => setEditForm(f => ({ ...f, coins: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Email</label>
+                <input type="email" className="input-field w-full" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Rôle</label>
+                  <select className="input-field w-full" value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}>
+                    <option value="USER">Utilisateur</option>
+                    <option value="PREMIUM">Premium</option>
+                    <option value="MODERATOR">Modérateur</option>
+                    <option value="ADMIN">Admin</option>
+                    <option value="SUPERADMIN">SuperAdmin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Plan</label>
+                  <select className="input-field w-full" value={editForm.plan} onChange={e => setEditForm(f => ({ ...f, plan: e.target.value }))}>
+                    <option value="FREE">Gratuit</option>
+                    <option value="STARTER">Starter</option>
+                    <option value="PRO">Pro</option>
+                    <option value="ADVANCED">Advanced</option>
+                    <option value="ELITE">Elite</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Statut</label>
+                  <select className="input-field w-full" value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}>
+                    <option value="ACTIVE">Actif</option>
+                    <option value="INACTIVE">Inactif</option>
+                    <option value="BANNED">Banni</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setShowModal(null)} className="btn-secondary flex-1">Annuler</button>
+              <button onClick={() => editUserMutation.mutate()} disabled={editUserMutation.isPending} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                {editUserMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Pencil className="w-4 h-4" /> Enregistrer</>}
               </button>
             </div>
           </motion.div>

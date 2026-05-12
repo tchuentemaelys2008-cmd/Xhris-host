@@ -141,20 +141,9 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
         ))}
       </nav>
 
-      {/* Dev Program banner */}
       <div className="p-4 border-t border-white/5">
-        <div className="bg-gradient-to-r from-yellow-600/20 to-orange-600/15 border border-yellow-500/20 rounded-xl p-3">
-          <div className="flex items-center gap-2 mb-1">
-            <Crown className="w-4 h-4 text-yellow-400" />
-            <span className="text-xs font-semibold text-yellow-400">Dev Program</span>
-          </div>
-          <p className="text-[11px] text-gray-400 mb-2">Plus vous créez, plus vous gagnez !</p>
-          <button className="w-full bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[11px] py-1.5 rounded-lg hover:bg-yellow-500/30 transition-colors">
-            En savoir plus
-          </button>
-        </div>
         <button onClick={() => signOut({ callbackUrl: '/' })}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-400 hover:bg-red-500/10 w-full mt-2 transition-colors">
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-400 hover:bg-red-500/10 w-full transition-colors">
           <LogOut className="w-3.5 h-3.5" />
           Déconnexion
         </button>

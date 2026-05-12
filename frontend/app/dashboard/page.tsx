@@ -83,10 +83,11 @@ export default function DashboardPage() {
     enabled: !!user,
   });
 
-  const stats = (statsData as any)?.data || {};
+  const stats = (statsData as any)?.data?.data || {};
   const balance = (balanceData as any)?.data?.data?.coins ?? user?.coins ?? 0;
-  const transactions: any[] = (txData as any)?.data?.transactions || [];
-  const referral = (referralData as any)?.data || {};
+  const _txRaw = (txData as any)?.data;
+  const transactions: any[] = Array.isArray(_txRaw?.data) ? _txRaw.data : Array.isArray(_txRaw?.transactions) ? _txRaw.transactions : Array.isArray(_txRaw) ? _txRaw : [];
+  const referral = (referralData as any)?.data?.data || {};
   const usageData: any[] = stats.usageChart || [];
 
   const activeServers: number = stats.activeServers ?? 0;

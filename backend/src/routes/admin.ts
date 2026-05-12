@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { AuthRequest, adminMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
@@ -93,11 +94,16 @@ router.get('/users/:id', async (req: AuthRequest, res: Response) => {
 
 router.patch('/users/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const { role, status, plan, planExpiry } = req.body;
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { role, status, plan, planExpiry: planExpiry ? new Date(planExpiry) : undefined },
-    });
+    const { name, email, role, status, plan, planExpiry, coins } = req.body;
+    const data: any = {};
+    if (name !== undefined) data.name = name;
+    if (email !== undefined) data.email = email;
+    if (role !== undefined) data.role = role;
+    if (status !== undefined) data.status = status;
+    if (plan !== undefined) data.plan = plan;
+    if (planExpiry) data.planExpiry = new Date(planExpiry);
+    if (coins !== undefined) data.coins = Number(coins);
+    const user = await prisma.user.update({ where: { id: req.params.id }, data });
     sendSuccess(res, user, 'Utilisateur mis à jour');
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
@@ -136,14 +142,16 @@ router.post('/users/:id/coins', async (req: AuthRequest, res: Response) => {
 
 router.post('/users', async (req: AuthRequest, res: Response) => {
   try {
-    const { name, email, role, plan } = req.body;
+    const { name, email, password, role, plan, coins } = req.body;
     if (!name || !email) return sendError(res, 'Nom et email requis', 400);
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return sendError(res, 'Email déjà utilisé', 409);
+    const hashedPassword = password ? await bcrypt.hash(password, 12) : undefined;
     const user = await prisma.user.create({
-      data: { name, email, role: role || 'USER', plan: plan || 'FREE', emailVerified: true, coins: 10 },
+      data: { name, email, password: hashedPassword, role: role || 'USER', plan: plan || 'FREE', emailVerified: true, coins: coins !== undefined ? Number(coins) : 10 },
     });
-    sendSuccess(res, user, 'Utilisateur créé', 201);
+    const { password: _, ...safeUser } = user as any;
+    sendSuccess(res, safeUser, 'Utilisateur créé', 201);
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 

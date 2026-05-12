@@ -30,6 +30,8 @@ export default function CoinsSharePage() {
   const [note, setNote]                     = useState('');
   const [requestAmount, setRequestAmount]   = useState('');
   const [sent, setSent]                     = useState(false);
+  const [sentAmount, setSentAmount]         = useState(0);
+  const [sentTo, setSentTo]                 = useState('');
 
   // ── Lookup état ──────────────────────────────────────────────────
   const [recipient, setRecipient]           = useState<{ id: string; name: string; avatar?: string } | null>(null);
@@ -61,7 +63,7 @@ export default function CoinsSharePage() {
     enabled:  !!user,
   });
 
-  const _rawReferral  = (referralData as any)?.data ?? {};
+  const _rawReferral  = (referralData as any)?.data?.data ?? {};
   const referral      = _rawReferral && !Array.isArray(_rawReferral) ? _rawReferral : {};
 
   const requestLink = typeof window !== 'undefined'
@@ -119,21 +121,22 @@ export default function CoinsSharePage() {
   const transferMutation = useMutation({
     mutationFn: () => coinsApi.transfer(transferId.trim(), amountNum),
     onSuccess: () => {
-      // Force immediate refetch so balance updates right away
       invalidateBalance();
       qc.invalidateQueries({ queryKey: ['coins-transactions'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
       qc.invalidateQueries({ queryKey: ['recent-recipients'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
       const recipientName = recipient?.name || 'l\'utilisateur';
-      toast.success(`✓ ${amountNum} Coins envoyés à ${recipientName} avec succès !`, { duration: 10000 });
+      setSentAmount(amountNum);
+      setSentTo(recipientName);
       setTransferId('');
       setTransferAmount('');
       setNote('');
       setRecipient(null);
       setLookupState('idle');
       setSent(true);
-      setTimeout(() => setSent(false), 3000);
+      setTimeout(() => setSent(false), 5000);
     },
     onError: (e: any) => {
       const msg = e?.response?.data?.message || 'Erreur lors du transfert';
@@ -199,8 +202,8 @@ export default function CoinsSharePage() {
               className="text-center py-8"
             >
               <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
-              <div className="text-white font-medium">Coins envoyés !</div>
-              <div className="text-xs text-gray-400 mt-1">{amountNum} Coins transférés</div>
+              <div className="text-white font-medium text-lg">{sentAmount.toLocaleString('fr-FR')} Coins envoyés !</div>
+              <div className="text-xs text-gray-400 mt-1">Transférés à @{sentTo} avec succès</div>
             </motion.div>
           ) : (
             <div className="space-y-3">

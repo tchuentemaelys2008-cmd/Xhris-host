@@ -95,6 +95,19 @@ router.post('/channels/:id/messages', async (req: AuthRequest, res: Response) =>
       data: { channelId: req.params.id, userId: req.user!.id, content, attachments: attachments || [] },
       include: { user: { select: { id: true, name: true, avatar: true, role: true } } },
     });
+
+    // Auto-delete: if channel has more than 150 messages, delete oldest 140
+    const count = await prisma.message.count({ where: { channelId: req.params.id } });
+    if (count > 150) {
+      const oldest = await prisma.message.findMany({
+        where: { channelId: req.params.id },
+        orderBy: { createdAt: 'asc' },
+        take: 140,
+        select: { id: true },
+      });
+      await prisma.message.deleteMany({ where: { id: { in: oldest.map((m: any) => m.id) } } });
+    }
+
     sendSuccess(res, message, 'Message envoyé', 201);
   } catch (err) {
     sendError(res, 'Erreur', 500);

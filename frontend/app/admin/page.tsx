@@ -41,7 +41,7 @@ export default function AdminDashboardPage() {
     queryFn: () => adminApi.getUsers({ limit: 5, page: 1 }),
   });
 
-  const stats = (statsData as any)?.data || {};
+  const stats = (statsData as any)?.data?.data || {};
   const recentUsers: any[] = (() => {
     const d = (usersData as any)?.data;
     if (!d) return [];

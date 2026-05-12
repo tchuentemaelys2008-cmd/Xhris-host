@@ -9,8 +9,9 @@ import {
   LogOut, Trash2, Clock, Globe, LayoutDashboard, TrendingUp,
 } from 'lucide-react';
 import Link from 'next/link';
-import { userApi } from '@/lib/api';
+import { userApi, coinsApi } from '@/lib/api';
 import { useCoinsBalance } from '@/lib/useCoinsBalance';
+import { Share2, Link2 } from 'lucide-react';
 import { formatDate, formatRelative, copyToClipboard, cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -49,6 +50,10 @@ export default function ProfilePage() {
 
   const { data: statsData } = useQuery({ queryKey: ['user-stats'], queryFn: () => userApi.getDashboardStats() });
   const { data: sessionsData } = useQuery({ queryKey: ['sessions'], queryFn: () => userApi.getSessions(), enabled: tab === 'sessions' });
+  const { data: referralData } = useQuery({ queryKey: ['referral'], queryFn: () => coinsApi.getReferralStats(), enabled: !!user });
+  const referral = (referralData as any)?.data?.data ?? {};
+  const referralLink = typeof window !== 'undefined' && referral.referralCode ? `${window.location.origin}/auth/register?ref=${referral.referralCode}` : '';
+  const requestLink = typeof window !== 'undefined' && user?.id ? `${window.location.origin}/request-coins/${user.id}` : '';
 
   const { balance: coinsBalance } = useCoinsBalance();
   const profile = (profileData as any)?.data || {};
@@ -377,6 +382,51 @@ export default function ProfilePage() {
           </button>
         </div>
       )}
+
+      {/* Referral + Request coins — always visible below tabs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+        {/* Referral link */}
+        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Share2 className="w-4 h-4 text-green-400" />
+            <span className="text-sm font-semibold text-white">Lien de parrainage</span>
+          </div>
+          {!profile?.emailVerified && !profile?.googleId ? (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-400">
+              Vérifiez votre email pour activer le parrainage. Les coins ne sont crédités qu'après vérification.
+            </div>
+          ) : referralLink ? (
+            <>
+              <p className="text-xs text-gray-400 mb-2">
+                Partagez ce lien · <span className="text-green-400 font-medium">{referral.totalReferrals || 0} filleuls</span> · <span className="text-amber-400">{referral.totalEarned || 0} Coins gagnés</span>
+              </p>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-2.5 py-2 text-xs text-green-400 truncate">{referralLink}</div>
+                <button className="btn-secondary px-2.5" onClick={() => copyToClipboard(referralLink).then(() => toast.success('Copié !'))}><Copy className="w-3.5 h-3.5" /></button>
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-gray-500">Chargement...</div>
+          )}
+        </div>
+
+        {/* Request coins link */}
+        <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Link2 className="w-4 h-4 text-blue-400" />
+            <span className="text-sm font-semibold text-white">Demander des Coins</span>
+          </div>
+          <p className="text-xs text-gray-400 mb-2">Partagez ce lien pour recevoir des Coins.</p>
+          {requestLink ? (
+            <div className="flex gap-2">
+              <div className="flex-1 bg-[#1A1A24] border border-white/5 rounded-lg px-2.5 py-2 text-xs text-blue-400 truncate">{requestLink}</div>
+              <button className="btn-secondary px-2.5" onClick={() => copyToClipboard(requestLink).then(() => toast.success('Copié !'))}><Copy className="w-3.5 h-3.5" /></button>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">Chargement...</div>
+          )}
+        </div>
+      </div>
 
       {/* Tab: Sessions */}
       {tab === 'sessions' && (
