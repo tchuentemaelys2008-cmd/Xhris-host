@@ -196,7 +196,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             <div className="text-xs text-gray-400 mb-1">SOLDE ACTUEL</div>
             <div className="flex items-center gap-2">
               <CoinIcon className="w-6 h-6 flex-shrink-0" />
-              <div className="text-2xl font-bold text-white">{balance.toLocaleString('fr-FR')}</div>
+              <div className="text-lg font-bold text-white">{balance.toLocaleString('fr-FR')}</div>
               <span className="text-xs text-amber-400 font-medium">coins</span>
             </div>
             {coinsEarnedToday > 0 && (
@@ -291,9 +291,9 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
             {/* Solde compact cliquable */}
             <Link href="/dashboard/coins/buy"
-              className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-1.5 hover:bg-amber-500/20 transition-colors">
-              <CoinIcon className="w-4 h-4" />
-              <span className="text-sm font-semibold text-amber-400">{balance.toLocaleString('fr-FR')}</span>
+              className="hidden sm:flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1 hover:bg-amber-500/20 transition-colors">
+              <CoinIcon className="w-3 h-3" />
+              <span className="text-xs font-semibold text-amber-400">{balance.toLocaleString('fr-FR')}</span>
               <span className="text-amber-400 text-xs font-bold leading-none">+</span>
             </Link>
 
