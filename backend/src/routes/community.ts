@@ -6,11 +6,18 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 
-const uploadDir = path.join(process.cwd(), 'uploads', 'community');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// Use /tmp which is always writable in containers
+const getUploadDir = () => {
+  const dir = path.join('/tmp', 'xhris-uploads', 'community');
+  try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+};
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (_req, _file, cb) => {
+    const dir = getUploadDir();
+    cb(null, dir);
+  },
   filename: (_req, file, cb) => {
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     cb(null, `${unique}${path.extname(file.originalname)}`);
