@@ -34,6 +34,8 @@ export default function CommunityPage() {
   const [mobileView, setMobileView] = useState<'channels' | 'chat' | 'members'>('channels');
   const [isMobile, setIsMobile] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Track actual visible viewport height (excludes keyboard on mobile)
+  const [viewportH, setViewportH] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +45,21 @@ export default function CommunityPage() {
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Track visual viewport (shrinks when keyboard opens on mobile)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const vv = (window as any).visualViewport;
+    if (!vv) return;
+    const update = () => setViewportH(vv.height);
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
   }, []);
 
   const { data: channelsData } = useQuery({
@@ -477,8 +494,16 @@ export default function CommunityPage() {
 
   // ─── Mobile render ────────────────────────────────────────────────
   if (isMobile) {
+    // Keyboard is open when viewportH is significantly less than screen height
+    const keyboardOpen = viewportH !== null && viewportH < window.innerHeight * 0.75;
+    // In chat view with keyboard open, hide bottom nav so input is fully visible
+    const hideBottomNav = mobileView === 'chat' && keyboardOpen;
+
     return (
-      <div className="flex flex-col -m-4" style={{ height: 'calc(100vh - 64px)' }}>
+      <div
+        className="flex flex-col -m-4 overflow-hidden"
+        style={{ height: viewportH ? `${viewportH}px` : 'calc(100dvh - 64px)' }}
+      >
         <AnimatePresence mode="wait">
           {mobileView === 'channels' && (
             <motion.div key="ch" initial={{ x: -200, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -200, opacity: 0 }} transition={{ duration: 0.18 }} className="flex-1 overflow-hidden">
@@ -486,10 +511,20 @@ export default function CommunityPage() {
             </motion.div>
           )}
           {mobileView === 'chat' && (
-            <motion.div key="chat" initial={{ x: 200, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 200, opacity: 0 }} transition={{ duration: 0.18 }} className="flex-1 flex flex-col overflow-hidden">
+            <motion.div
+              key="chat"
+              initial={{ x: 200, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 200, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="flex-1 flex flex-col min-h-0 overflow-hidden"
+            >
+              {/* Header — always visible */}
               {chatHeaderJsx}
+              {/* Messages — fills remaining space, scrollable */}
               {messagesJsx}
-              {inputBarJsx}
+              {/* Input — always pinned at bottom, above keyboard */}
+              <div className="flex-shrink-0 bg-[#0D0D14]">
+                {inputBarJsx}
+              </div>
             </motion.div>
           )}
           {mobileView === 'members' && (
@@ -499,29 +534,32 @@ export default function CommunityPage() {
           )}
         </AnimatePresence>
 
-        <div className="flex border-t border-white/10 bg-[#0A0A0F] flex-shrink-0">
-          {[
-            { view: 'channels' as const, icon: Hash,           label: 'Salons' },
-            { view: 'chat'     as const, icon: MessageSquare,  label: 'Chat' },
-            { view: 'members'  as const, icon: Users,          label: 'Membres' },
-          ].map(({ view, icon: Icon, label }) => (
-            <button
-              key={view}
-              onClick={() => setMobileView(view)}
-              className={cn('flex-1 flex flex-col items-center gap-1 py-3 transition-colors', mobileView === view ? 'text-purple-400' : 'text-gray-500 hover:text-gray-300')}
-            >
-              <Icon className="w-5 h-5" />
-              <span className="text-xs">{label}</span>
-            </button>
-          ))}
-        </div>
+        {/* Bottom nav — hidden when keyboard is open in chat to free vertical space */}
+        {!hideBottomNav && (
+          <div className="flex border-t border-white/10 bg-[#0A0A0F] flex-shrink-0">
+            {[
+              { view: 'channels' as const, icon: Hash,          label: 'Salons' },
+              { view: 'chat'     as const, icon: MessageSquare, label: 'Chat' },
+              { view: 'members'  as const, icon: Users,         label: 'Membres' },
+            ].map(({ view, icon: Icon, label }) => (
+              <button
+                key={view}
+                onClick={() => setMobileView(view)}
+                className={cn('flex-1 flex flex-col items-center gap-1 py-3 transition-colors', mobileView === view ? 'text-purple-400' : 'text-gray-500 hover:text-gray-300')}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-xs">{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
   // ─── Desktop render ───────────────────────────────────────────────
   return (
-    <div className="flex -m-4 md:-m-6 overflow-hidden rounded-xl border border-white/5" style={{ height: 'calc(100vh - 80px)' }}>
+    <div className="flex -m-4 md:-m-6 overflow-hidden rounded-xl border border-white/5" style={{ height: 'calc(100dvh - 80px)' }}>
       {channelSidebarJsx}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">

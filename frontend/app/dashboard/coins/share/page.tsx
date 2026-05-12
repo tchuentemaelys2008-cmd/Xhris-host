@@ -40,6 +40,8 @@ export default function CoinsSharePage() {
     queryKey: ['coins-balance'],
     queryFn:  () => coinsApi.getBalance(),
     enabled:  !!user,
+    staleTime: 0,
+    refetchInterval: 15000,
   });
 
   // ── Destinataires récents ────────────────────────────────────────
@@ -63,7 +65,8 @@ export default function CoinsSharePage() {
     enabled:  !!user,
   });
 
-  const balance       = (balanceData as any)?.data?.coins ?? user?.coins ?? 0;
+  // Never fallback to session.user.coins (stale after login)
+  const balance       = (balanceData as any)?.data?.coins ?? 0;
   const _rawReferral  = (referralData as any)?.data ?? {};
   const referral      = _rawReferral && !Array.isArray(_rawReferral) ? _rawReferral : {};
 

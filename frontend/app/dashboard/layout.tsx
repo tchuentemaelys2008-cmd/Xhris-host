@@ -98,12 +98,13 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     });
   }, [user?.id]);
 
-  // ── Solde coins ────────────────────────────────────────────────
+  // ── Solde coins — staleTime:0 pour refetch immédiat après transfert ──
   const { data: balanceData } = useQuery({
     queryKey: ['coins-balance'],
     queryFn: () => coinsApi.getBalance(),
     enabled: !!user,
-    refetchInterval: 30000,
+    staleTime: 0,           // toujours re-fetch quand la query est invalidée
+    refetchInterval: 20000, // auto-refresh toutes les 20s
   });
 
   // ── Notifications ──────────────────────────────────────────────
@@ -114,7 +115,8 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
     refetchInterval: 60000,
   });
 
-  const balance          = (balanceData as any)?.data?.coins      ?? user?.coins ?? 0;
+  // Toujours lire depuis l'API, jamais depuis session.user.coins (stale après login)
+  const balance          = (balanceData as any)?.data?.coins      ?? 0;
   const coinsEarnedToday = (balanceData as any)?.data?.earnedToday ?? 0;
 
   // ── FIX : garantir que notifications est toujours un tableau ──
