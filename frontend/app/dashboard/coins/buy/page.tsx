@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
@@ -44,7 +44,6 @@ function formatPrice(eurPrice: number, currency: typeof CURRENCIES[0]) {
 
 export default function BuyCoinsPage() {
   const { data: session } = useSession();
-  const qc = useQueryClient();
   const user = session?.user as any;
 
   const [selectedPack, setSelectedPack] = useState<any>(null);

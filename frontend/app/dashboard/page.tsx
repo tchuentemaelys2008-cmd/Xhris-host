@@ -10,7 +10,6 @@ import {
 } from 'recharts';
 import { Bot, Server, Coins, Zap, ArrowRight, Copy, Loader2, Crown, Newspaper, Users, Gift, CheckCircle } from 'lucide-react';
 import { userApi, coinsApi } from '@/lib/api';
-import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -66,8 +65,11 @@ export default function DashboardPage() {
     enabled: !!user,
   });
 
-  const { balance } = useCoinsBalance();  // shared, always fresh
-  const invalidateBalance = useInvalidateBalance();
+  const { data: balanceData } = useQuery({
+    queryKey: ['coins-balance'],
+    queryFn: () => coinsApi.getBalance(),
+    enabled: !!user,
+  });
 
   const { data: txData } = useQuery({
     queryKey: ['coins-transactions-recent'],
@@ -82,6 +84,7 @@ export default function DashboardPage() {
   });
 
   const stats = (statsData as any)?.data || {};
+  const balance = (balanceData as any)?.data?.coins ?? user?.coins ?? 0;
   const transactions: any[] = (txData as any)?.data?.transactions || [];
   const referral = (referralData as any)?.data || {};
   const usageData: any[] = stats.usageChart || [];
@@ -104,7 +107,7 @@ export default function DashboardPage() {
     mutationFn: () => coinsApi.claimDailyBonus(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
-      invalidateBalance();
+      qc.invalidateQueries({ queryKey: ['coins-balance'] });
       qc.invalidateQueries({ queryKey: ['coins-transactions-recent'] });
       toast.success('+3 Coins bonus quotidien reçus !');
     },
