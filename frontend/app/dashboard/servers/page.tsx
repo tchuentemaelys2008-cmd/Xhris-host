@@ -35,7 +35,7 @@ export default function ServersPage() {
     enabled: !!token,
   });
 
-  const _rawServers = (data as any)?.data?.servers ?? (data as any)?.data;
+  const _rawServers = (data as any)?.data?.servers ?? (data as any)?.data?.data ?? (data as any)?.data;
   const servers: any[] = Array.isArray(_rawServers) ? _rawServers : [];
 
   const PLAN_COSTS: Record<string, number> = { STARTER: 10, PRO: 20, ADVANCED: 40, ELITE: 80 };
