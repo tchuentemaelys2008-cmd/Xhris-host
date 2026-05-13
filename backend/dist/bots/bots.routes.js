@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const bots_controller_1 = require("./bots.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.authenticate);
+router.get('/', bots_controller_1.getAllBots);
+router.get('/:id', bots_controller_1.getBotById);
+router.post('/deploy', bots_controller_1.deployBot);
+router.post('/:id/start', bots_controller_1.startBot);
+router.post('/:id/stop', bots_controller_1.stopBot);
+router.post('/:id/restart', bots_controller_1.restartBot);
+router.delete('/:id', bots_controller_1.deleteBot);
+router.get('/:id/logs', bots_controller_1.getBotLogs);
+router.patch('/:id/env', bots_controller_1.updateEnvVars);
+router.get('/:id/stats', bots_controller_1.getBotStats);
+exports.default = router;

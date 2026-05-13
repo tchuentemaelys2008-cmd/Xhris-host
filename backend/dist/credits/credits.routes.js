@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const credits_controller_1 = require("./credits.controller");
+const router = (0, express_1.Router)();
+router.get('/balance', auth_middleware_1.authenticate, credits_controller_1.getBalance);
+router.get('/packs', credits_controller_1.getPacks);
+router.post('/purchase', auth_middleware_1.authenticate, credits_controller_1.purchaseCoins);
+router.post('/transfer', auth_middleware_1.authenticate, credits_controller_1.transferCoins);
+router.post('/daily-bonus', auth_middleware_1.authenticate, credits_controller_1.claimDailyBonus);
+router.post('/bonus-code', auth_middleware_1.authenticate, credits_controller_1.applyBonusCode);
+router.get('/transactions', auth_middleware_1.authenticate, credits_controller_1.getTransactions);
+router.get('/referral', auth_middleware_1.authenticate, credits_controller_1.getReferralStats);
+router.get('/referral/leaderboard', credits_controller_1.getReferralLeaderboard);
+exports.default = router;
