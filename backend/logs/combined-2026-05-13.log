@@ -165,3 +165,5 @@
 2026-05-13T07:15:29.939Z [info]: ::ffff:127.0.0.1 - - [13/May/2026:07:15:29 +0000] "GET / HTTP/1.1" 404 45 "-" "monitor-telegram-clone-realtime/1.0"
 2026-05-13T07:15:29.942Z [info]: ::1 - - [13/May/2026:07:15:29 +0000] "GET / HTTP/1.1" 404 45 "-" "monitor-telegram-clone-realtime/1.0"
 2026-05-13T07:15:53.430Z [info]: ::ffff:127.0.0.1 - - [13/May/2026:07:15:53 +0000] "GET / HTTP/1.1" 404 45 "-" "monitor-telegram-clone-realtime/1.0"
+2026-05-13T07:35:56.981Z [info]: WebSocket server initialized
+2026-05-13T07:35:56.988Z [info]: XHRIS Host Backend started on port 3001

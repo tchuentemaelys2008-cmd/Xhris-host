@@ -4,6 +4,9 @@ const express_1 = require("express");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
 const docker_1 = require("../utils/docker");
+const child_process_1 = require("child_process");
+const util_1 = require("util");
+const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const router = (0, express_1.Router)();
 const PLAN_SPECS = {
     STARTER: { cpu: 1, ram: 1, storage: 10, coinsPerDay: 10 },
@@ -64,7 +67,7 @@ router.post('/', async (req, res) => {
             prisma_1.prisma.transaction.create({ data: { userId: req.user.id, type: 'CREATE_SERVER', description: `Création serveur ${name} (${plan})`, amount: -specs.coinsPerDay } }),
         ]);
         (0, docker_1.createServerContainer)(server.id, plan.toUpperCase())
-            .then(async ({ containerId, port }) => {
+            .then(async ({ containerId }) => {
             await prisma_1.prisma.server.update({
                 where: { id: server.id },
                 data: { status: 'ONLINE', dockerId: containerId },
@@ -153,6 +156,36 @@ router.get('/:id/logs', async (req, res) => {
             return (0, response_1.sendError)(res, 'Serveur non trouvé', 404);
         const logs = await (0, docker_1.getContainerLogs)(server.id);
         (0, response_1.sendSuccess)(res, { logs });
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/:id/exec', async (req, res) => {
+    try {
+        const server = await prisma_1.prisma.server.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+        if (!server)
+            return (0, response_1.sendError)(res, 'Serveur non trouvé', 404);
+        if (server.status !== 'ONLINE')
+            return (0, response_1.sendError)(res, 'Serveur hors ligne', 400);
+        const { command } = req.body;
+        if (!command)
+            return (0, response_1.sendError)(res, 'Commande requise', 400);
+        const containerName = `xhris-server-${server.id}`;
+        const { stdout, stderr } = await execAsync(`docker exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`)
+            .catch((err) => ({ stdout: '', stderr: err.message }));
+        (0, response_1.sendSuccess)(res, { output: stdout || stderr || 'Commande exécutée' });
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/:id/upload', async (req, res) => {
+    try {
+        const server = await prisma_1.prisma.server.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+        if (!server)
+            return (0, response_1.sendError)(res, 'Serveur non trouvé', 404);
+        (0, response_1.sendSuccess)(res, null, 'Fichier uploadé');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);

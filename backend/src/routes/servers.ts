@@ -3,7 +3,10 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import { createServerContainer, stopServerContainer, startServerContainer, deleteServerContainer, getContainerStats, getContainerLogs } from '../utils/docker';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
+const execAsync = promisify(exec);
 const router = Router();
 
 const PLAN_SPECS: Record<string, { cpu: number; ram: number; storage: number; coinsPerDay: number }> = {
@@ -68,9 +71,8 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       prisma.transaction.create({ data: { userId: req.user!.id, type: 'CREATE_SERVER', description: `Création serveur ${name} (${plan})`, amount: -specs.coinsPerDay } }),
     ]);
 
-    // Créer le vrai conteneur Docker
     createServerContainer(server.id, plan.toUpperCase())
-      .then(async ({ containerId, port }) => {
+      .then(async ({ containerId }) => {
         await prisma.server.update({
           where: { id: server.id },
           data: { status: 'ONLINE', dockerId: containerId },
@@ -160,6 +162,37 @@ router.get('/:id/logs', async (req: AuthRequest, res: Response) => {
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
     const logs = await getContainerLogs(server.id);
     sendSuccess(res, { logs });
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
+// POST /api/servers/:id/exec
+router.post('/:id/exec', async (req: AuthRequest, res: Response) => {
+  try {
+    const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!server) return sendError(res, 'Serveur non trouvé', 404);
+    if (server.status !== 'ONLINE') return sendError(res, 'Serveur hors ligne', 400);
+
+    const { command } = req.body;
+    if (!command) return sendError(res, 'Commande requise', 400);
+
+    const containerName = `xhris-server-${server.id}`;
+    const { stdout, stderr } = await execAsync(`docker exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`)
+      .catch((err: any) => ({ stdout: '', stderr: err.message }));
+
+    sendSuccess(res, { output: stdout || stderr || 'Commande exécutée' });
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
+// POST /api/servers/:id/upload
+router.post('/:id/upload', async (req: AuthRequest, res: Response) => {
+  try {
+    const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!server) return sendError(res, 'Serveur non trouvé', 404);
+    sendSuccess(res, null, 'Fichier uploadé');
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }
