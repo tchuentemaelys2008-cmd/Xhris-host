@@ -2,23 +2,21 @@ import { Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { deployBotContainer, stopBotContainer, startBotContainer, deleteBotContainer, getBotContainerLogs, getBotContainerStats } from '../utils/docker-bots';
 
-const DEPLOY_COST = 10; // coins per day
+const DEPLOY_COST = 10;
 const MAX_DEPLOYS_PER_DAY = 10;
 
-// ============ GET ALL BOTS ============
 export const getAllBots = async (req: AuthRequest, res: Response) => {
   try {
     const { status, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
     const where: any = { userId: req.user!.id };
     if (status) where.status = (status as string).toUpperCase();
-
     const [bots, total] = await Promise.all([
       prisma.bot.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: Number(limit) }),
       prisma.bot.count({ where }),
     ]);
-
     return res.json({ success: true, data: { bots, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) } });
   } catch (error) {
     logger.error('getAllBots error:', error);
@@ -26,7 +24,6 @@ export const getAllBots = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ============ GET BOT BY ID ============
 export const getBotById = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
@@ -37,31 +34,26 @@ export const getBotById = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ============ DEPLOY BOT ============
 export const deployBot = async (req: AuthRequest, res: Response) => {
   try {
     const { marketplaceBotId, sessionLink, envVars, serverId } = req.body;
     const userId = req.user!.id;
 
-    // Check daily deploy limit
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const deployCount = await prisma.bot.count({ where: { userId, createdAt: { gte: today } } });
     if (deployCount >= MAX_DEPLOYS_PER_DAY) {
       return res.status(400).json({ success: false, message: `Limite de ${MAX_DEPLOYS_PER_DAY} déploiements par jour atteinte` });
     }
 
-    // Check coins
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { coins: true } });
     if (!user || user.coins < DEPLOY_COST) {
       return res.status(400).json({ success: false, message: `Solde insuffisant. ${DEPLOY_COST} coins requis.` });
     }
 
-    // Get marketplace bot info
     const marketplaceBot = marketplaceBotId
       ? await prisma.marketplaceBot.findUnique({ where: { id: marketplaceBotId } })
       : null;
 
-    // Create bot
     const bot = await prisma.$transaction(async (tx) => {
       const newBot = await tx.bot.create({
         data: {
@@ -70,15 +62,11 @@ export const deployBot = async (req: AuthRequest, res: Response) => {
           version: marketplaceBot?.version || '1.0.0',
           platform: marketplaceBot?.platform || 'WHATSAPP',
           status: 'STARTING',
-          userId,
-          serverId,
-          sessionLink,
+          userId, serverId, sessionLink,
           envVars: envVars || {},
           coinsPerDay: DEPLOY_COST,
         },
       });
-
-      // Deduct coins
       await tx.user.update({ where: { id: userId }, data: { coins: { decrement: DEPLOY_COST } } });
       await tx.transaction.create({
         data: { userId, type: 'DEPLOY_BOT', description: `Déploiement de ${newBot.name}`, amount: -DEPLOY_COST, status: 'COMPLETED' },
@@ -86,22 +74,24 @@ export const deployBot = async (req: AuthRequest, res: Response) => {
       await tx.notification.create({
         data: { userId, title: 'Bot déployé ! 🤖', message: `${newBot.name} est en cours de démarrage.`, type: 'BOT' },
       });
-
-      // Update marketplace downloads
       if (marketplaceBotId) {
         await tx.marketplaceBot.update({ where: { id: marketplaceBotId }, data: { downloads: { increment: 1 } } });
       }
-
       return newBot;
     });
 
-    // Simulate bot starting (in prod: call your bot runner service)
-    setTimeout(async () => {
-      await prisma.bot.update({
-        where: { id: bot.id },
-        data: { status: 'RUNNING', logs: ['Bot démarré avec succès', 'Connexion WhatsApp établie', 'Session restaurée'] },
-      }).catch(() => {});
-    }, 3000);
+    // Déployer le vrai conteneur Docker
+    deployBotContainer(bot.id, bot.platform, envVars || {})
+      .then(async (containerId) => {
+        await prisma.bot.update({
+          where: { id: bot.id },
+          data: { status: 'RUNNING', processId: containerId, logs: ['Bot démarré avec succès', `Conteneur Docker: ${containerId.substring(0, 12)}`, `Plateforme: ${bot.platform}`] },
+        });
+      })
+      .catch(async (err) => {
+        logger.error('Docker deploy error:', err);
+        await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR', logs: ['Erreur lors du démarrage du conteneur'] } });
+      });
 
     logger.info(`Bot deployed: ${bot.id} by ${userId}`);
     return res.status(201).json({ success: true, message: 'Bot déployé avec succès', data: bot });
@@ -111,67 +101,63 @@ export const deployBot = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ============ START BOT ============
 export const startBot = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
     if (bot.status === 'RUNNING') return res.status(400).json({ success: false, message: 'Bot déjà en ligne' });
 
-    // Check coins
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
     if (!user || user.coins < bot.coinsPerDay) {
       return res.status(400).json({ success: false, message: `Solde insuffisant. ${bot.coinsPerDay} coins requis.` });
     }
 
-    const updated = await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STARTING' } });
-    setTimeout(async () => {
-      await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } }).catch(() => {});
-    }, 2000);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STARTING' } });
+    await startBotContainer(bot.id);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } });
 
-    return res.json({ success: true, message: 'Bot en cours de démarrage', data: updated });
+    return res.json({ success: true, message: 'Bot démarré' });
   } catch {
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 
-// ============ STOP BOT ============
 export const stopBot = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
     if (bot.status === 'STOPPED') return res.status(400).json({ success: false, message: 'Bot déjà arrêté' });
 
-    const updated = await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STOPPED', cpuUsage: 0, ramUsage: 0 } });
-    return res.json({ success: true, message: 'Bot arrêté', data: updated });
+    await stopBotContainer(bot.id);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STOPPED', cpuUsage: 0, ramUsage: 0 } });
+    return res.json({ success: true, message: 'Bot arrêté' });
   } catch {
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 
-// ============ RESTART BOT ============
 export const restartBot = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
 
     await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STARTING', restarts: { increment: 1 } } });
-    setTimeout(async () => {
-      await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } }).catch(() => {});
-    }, 2000);
+    await stopBotContainer(bot.id);
+    await startBotContainer(bot.id);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } });
 
-    return res.json({ success: true, message: 'Bot en cours de redémarrage' });
+    return res.json({ success: true, message: 'Bot redémarré' });
   } catch {
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 
-// ============ DELETE BOT ============
 export const deleteBot = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
 
+    await deleteBotContainer(bot.id);
     await prisma.bot.delete({ where: { id: bot.id } });
     return res.json({ success: true, message: 'Bot supprimé' });
   } catch {
@@ -179,17 +165,18 @@ export const deleteBot = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ============ GET BOT LOGS ============
 export const getBotLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id }, select: { logs: true } });
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
 
-    const logs = bot.logs.map((log, i) => ({
-      id: i,
-      timestamp: new Date(Date.now() - (bot.logs.length - i) * 60000).toISOString(),
-      message: log,
+    const dockerLogs = await getBotContainerLogs(bot.id);
+    const logs = dockerLogs.length > 0 ? dockerLogs.map((log, i) => ({
+      id: i, timestamp: new Date().toISOString(), message: log,
       level: log.toLowerCase().includes('error') ? 'error' : 'info',
+    })) : bot.logs.map((log, i) => ({
+      id: i, timestamp: new Date(Date.now() - (bot.logs.length - i) * 60000).toISOString(),
+      message: log, level: log.toLowerCase().includes('error') ? 'error' : 'info',
     }));
 
     return res.json({ success: true, data: logs });
@@ -198,30 +185,27 @@ export const getBotLogs = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ============ UPDATE ENV VARS ============
 export const updateEnvVars = async (req: AuthRequest, res: Response) => {
   try {
     const { vars } = req.body;
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
-
     const updated = await prisma.bot.update({ where: { id: bot.id }, data: { envVars: vars } });
-    return res.json({ success: true, message: 'Variables d\'environnement mises à jour', data: updated });
+    return res.json({ success: true, message: 'Variables mises à jour', data: updated });
   } catch {
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 
-// ============ GET BOT STATS ============
 export const getBotStats = async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return res.status(404).json({ success: false, message: 'Bot non trouvé' });
 
-    return res.json({
-      success: true,
-      data: { cpu: bot.cpuUsage, ram: bot.ramUsage, uptime: bot.uptime, restarts: bot.restarts, status: bot.status },
-    });
+    const { cpu, ram } = await getBotContainerStats(bot.id);
+    await prisma.bot.update({ where: { id: bot.id }, data: { cpuUsage: cpu, ramUsage: ram } });
+
+    return res.json({ success: true, data: { cpu, ram, uptime: bot.uptime, restarts: bot.restarts, status: bot.status } });
   } catch {
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }

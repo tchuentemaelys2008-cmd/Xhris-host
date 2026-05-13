@@ -12,6 +12,7 @@ import { formatRelative, getStatusDot, getStatusLabel, cn } from '@/lib/utils';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis } from 'recharts';
 
 
+const MOCK_CHART = [1,2,3,4,5,6,7].map((i) => ({ v: Math.random() * 100 }));
 export default function AdminServersPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');

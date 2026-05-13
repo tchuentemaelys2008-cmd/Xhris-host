@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import { createServerContainer, stopServerContainer, startServerContainer, deleteServerContainer, getContainerStats, getContainerLogs } from '../utils/docker';
 
 const router = Router();
 
@@ -18,10 +19,8 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const status = req.query.status as string;
-
     const where: any = { userId: req.user!.id };
     if (status) where.status = status.toUpperCase();
-
     const [servers, total] = await Promise.all([
       prisma.server.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page-1)*limit, take: limit }),
       prisma.server.count({ where }),
@@ -48,7 +47,6 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   try {
     const { name, plan } = req.body;
     if (!name || !plan) return sendError(res, 'Nom et plan requis', 400);
-
     const specs = PLAN_SPECS[plan.toUpperCase()];
     if (!specs) return sendError(res, 'Plan invalide', 400);
 
@@ -59,13 +57,9 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     const server = await prisma.server.create({
       data: {
-        name,
-        plan: plan.toUpperCase() as any,
-        status: 'STARTING',
-        userId: req.user!.id,
-        domain,
-        storageTotal: specs.storage,
-        coinsPerDay: specs.coinsPerDay,
+        name, plan: plan.toUpperCase() as any,
+        status: 'STARTING', userId: req.user!.id,
+        domain, storageTotal: specs.storage, coinsPerDay: specs.coinsPerDay,
       },
     });
 
@@ -74,9 +68,17 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       prisma.transaction.create({ data: { userId: req.user!.id, type: 'CREATE_SERVER', description: `Création serveur ${name} (${plan})`, amount: -specs.coinsPerDay } }),
     ]);
 
-    setTimeout(async () => {
-      try { await prisma.server.update({ where: { id: server.id }, data: { status: 'ONLINE' } }); } catch {}
-    }, 5000);
+    // Créer le vrai conteneur Docker
+    createServerContainer(server.id, plan.toUpperCase())
+      .then(async ({ containerId, port }) => {
+        await prisma.server.update({
+          where: { id: server.id },
+          data: { status: 'ONLINE', dockerId: containerId },
+        });
+      })
+      .catch(async () => {
+        await prisma.server.update({ where: { id: server.id }, data: { status: 'ERROR' } });
+      });
 
     sendSuccess(res, server, 'Serveur en cours de création', 201);
   } catch (err) {
@@ -89,16 +91,10 @@ router.post('/:id/start', async (req: AuthRequest, res: Response) => {
   try {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
-
-    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
-    if (!user || user.coins < server.coinsPerDay) return sendError(res, 'Coins insuffisants', 400);
-
     await prisma.server.update({ where: { id: server.id }, data: { status: 'STARTING' } });
-    setTimeout(async () => {
-      try { await prisma.server.update({ where: { id: server.id }, data: { status: 'ONLINE' } }); } catch {}
-    }, 3000);
-
-    sendSuccess(res, null, 'Serveur en cours de démarrage');
+    await startServerContainer(server.id);
+    await prisma.server.update({ where: { id: server.id }, data: { status: 'ONLINE' } });
+    sendSuccess(res, null, 'Serveur démarré');
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }
@@ -109,6 +105,7 @@ router.post('/:id/stop', async (req: AuthRequest, res: Response) => {
   try {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
+    await stopServerContainer(server.id);
     await prisma.server.update({ where: { id: server.id }, data: { status: 'OFFLINE' } });
     sendSuccess(res, null, 'Serveur arrêté');
   } catch (err) {
@@ -122,10 +119,10 @@ router.post('/:id/restart', async (req: AuthRequest, res: Response) => {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
     await prisma.server.update({ where: { id: server.id }, data: { status: 'STARTING' } });
-    setTimeout(async () => {
-      try { await prisma.server.update({ where: { id: server.id }, data: { status: 'ONLINE' } }); } catch {}
-    }, 3000);
-    sendSuccess(res, null, 'Serveur en cours de redémarrage');
+    await stopServerContainer(server.id);
+    await startServerContainer(server.id);
+    await prisma.server.update({ where: { id: server.id }, data: { status: 'ONLINE' } });
+    sendSuccess(res, null, 'Serveur redémarré');
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }
@@ -136,6 +133,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
+    await deleteServerContainer(server.id);
     await prisma.server.delete({ where: { id: server.id } });
     sendSuccess(res, null, 'Serveur supprimé');
   } catch (err) {
@@ -146,40 +144,10 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
 // GET /api/servers/:id/stats
 router.get('/:id/stats', async (req: AuthRequest, res: Response) => {
   try {
-    const server = await prisma.server.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
-      select: { cpuUsage: true, ramUsage: true, storageUsed: true, storageTotal: true, uptime: true, status: true },
-    });
-    if (!server) return sendError(res, 'Serveur non trouvé', 404);
-
-    // Simulate dynamic stats
-    sendSuccess(res, {
-      ...server,
-      cpuUsage: Math.random() * 80,
-      ramUsage: Math.random() * 70,
-    });
-  } catch (err) {
-    sendError(res, 'Erreur', 500);
-  }
-});
-
-// GET /api/servers/:id/files
-router.get('/:id/files', async (req: AuthRequest, res: Response) => {
-  try {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
-    if (server.status !== 'ONLINE') return sendError(res, 'Serveur hors ligne', 400);
-
-    // Simulate file listing
-    const path = req.query.path as string || '/';
-    const files = [
-      { name: 'index.js', type: 'file', size: 2048, modified: new Date().toISOString() },
-      { name: 'package.json', type: 'file', size: 512, modified: new Date().toISOString() },
-      { name: 'node_modules', type: 'directory', size: 0, modified: new Date().toISOString() },
-      { name: '.env', type: 'file', size: 256, modified: new Date().toISOString() },
-    ];
-
-    sendSuccess(res, { path, files });
+    const { cpu, ram } = await getContainerStats(server.id);
+    sendSuccess(res, { ...server, cpuUsage: cpu, ramUsage: ram });
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }
@@ -190,14 +158,7 @@ router.get('/:id/logs', async (req: AuthRequest, res: Response) => {
   try {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
-
-    const logs = [
-      `[${new Date().toISOString()}] Serveur démarré`,
-      `[${new Date().toISOString()}] Node.js v20.0.0 détecté`,
-      `[${new Date().toISOString()}] Dépendances installées`,
-      `[${new Date().toISOString()}] Application démarrée sur le port 3000`,
-    ];
-
+    const logs = await getContainerLogs(server.id);
     sendSuccess(res, { logs });
   } catch (err) {
     sendError(res, 'Erreur', 500);
