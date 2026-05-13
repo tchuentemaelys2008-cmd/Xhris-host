@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, authMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import crypto from 'crypto';
@@ -630,7 +630,7 @@ supportRouter.post('/tickets/:id/reply', async (req: AuthRequest, res: Response)
 // ========== PAYMENTS ==========
 export const paymentsRouter = Router();
 
-paymentsRouter.post('/initiate', async (req: AuthRequest, res: Response) => {
+paymentsRouter.post('/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { amount, method, packId } = req.body;
     if (!amount || !method) return sendError(res, 'Montant et méthode requis', 400);
@@ -653,7 +653,7 @@ paymentsRouter.post('/initiate', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/payments/fapshi/initiate — Fapshi automatic payment
-paymentsRouter.post('/fapshi/initiate', async (req: AuthRequest, res: Response) => {
+paymentsRouter.post('/fapshi/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { packId, coins, amount, phone } = req.body;
     if (!packId || !coins || !amount || !phone) return sendError(res, 'Paramètres manquants', 400);
@@ -696,7 +696,7 @@ paymentsRouter.post('/fapshi/initiate', async (req: AuthRequest, res: Response) 
 });
 
 // POST /api/payments/geniuspay/initiate — GeniusPay checkout
-paymentsRouter.post('/geniuspay/initiate', async (req: AuthRequest, res: Response) => {
+paymentsRouter.post('/geniuspay/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { packId, coins, amount, currency = 'XOF', description, successUrl, errorUrl } = req.body;
     if (!packId || !coins || !amount) return sendError(res, 'Paramètres manquants', 400);
@@ -864,7 +864,7 @@ paymentsRouter.post('/geniuspay/webhook', async (req: any, res: Response) => {
   } catch (err) { res.status(500).json({ success: false }); }
 });
 
-paymentsRouter.get('/verify/:reference', async (req: AuthRequest, res: Response) => {
+paymentsRouter.get('/verify/:reference', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
     if (!payment) return sendError(res, 'Paiement non trouvé', 404);
@@ -872,7 +872,7 @@ paymentsRouter.get('/verify/:reference', async (req: AuthRequest, res: Response)
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
-paymentsRouter.post('/withdraw', async (req: AuthRequest, res: Response) => {
+paymentsRouter.post('/withdraw', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { amount, method, details } = req.body;
     if (!amount || amount < 10) return sendError(res, 'Montant minimum: €10', 400);
@@ -890,7 +890,7 @@ paymentsRouter.post('/withdraw', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
-paymentsRouter.get('/withdrawals', async (req: AuthRequest, res: Response) => {
+paymentsRouter.get('/withdrawals', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const withdrawals = await prisma.withdrawal.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
     sendSuccess(res, withdrawals);

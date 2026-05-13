@@ -1,5 +1,5 @@
 import { Router, Response, Request } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, authMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 
@@ -69,7 +69,7 @@ router.get('/categories', async (_req: Request, res: Response) => {
 });
 
 // POST /api/marketplace/bots/:id/reviews
-router.post('/bots/:id/reviews', async (req: AuthRequest, res: Response) => {
+router.post('/bots/:id/reviews', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { rating, comment } = req.body;
     if (!rating || rating < 1 || rating > 5) return sendError(res, 'Note invalide (1-5)', 400);
