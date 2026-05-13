@@ -172,7 +172,7 @@ export default function ServersPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{server.name}</span>
+                    <Link href={`/dashboard/servers/${server.id}`} className="text-sm font-medium text-white hover:text-purple-400 transition-colors">{server.name}</Link>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       server.plan === 'ELITE' ? 'bg-yellow-500/20 text-yellow-400' :
                       server.plan === 'ADVANCED' ? 'bg-purple-500/20 text-purple-400' :
