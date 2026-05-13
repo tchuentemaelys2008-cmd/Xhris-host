@@ -195,11 +195,16 @@ export const developerApi = {
   getStats: () => apiClient.get('/developer/stats'),
   getPublications: (params?: any) => apiClient.get('/developer/bots', { params }),
   submitBot: (data: any) => apiClient.post('/developer/bots', data),
+  submitBotWithFile: (formData: FormData) =>
+    apiClient.post('/developer/bots/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
   updateBot: (id: string, data: any) => apiClient.patch(`/developer/bots/${id}`, data),
   deleteBot: (id: string) => apiClient.delete(`/developer/bots/${id}`),
   getEarnings: (params?: any) => apiClient.get('/developer/earnings', { params }),
   getReferrals: () => apiClient.get('/developer/referrals'),
   getLeaderboard: () => apiClient.get('/developer/leaderboard'),
+  downloadConnector: () => `${typeof window !== 'undefined' ? '/api' : ''}/developer/connector/download`,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

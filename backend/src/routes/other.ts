@@ -4,6 +4,9 @@ import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 // ========== DEVELOPER ==========
 export const developerRouter = Router();
@@ -51,6 +54,348 @@ developerRouter.get('/stats', async (req: AuthRequest, res: Response) => {
     sendSuccess(res, { botsPublished: botsCount, totalDownloads: totalDownloads._sum.downloads || 0, avgRating: avgRating._avg.rating || 0 });
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
+
+// ─── Multer for bot ZIP uploads ───────────────────────────────────────────────
+const botStorage = multer.diskStorage({
+  destination: (_req: any, _file: any, cb: any) => {
+    const dir = '/tmp/xhris-uploads/bots';
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req: any, file: any, cb: any) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}-${file.originalname}`);
+  },
+});
+const botUpload = multer({
+  storage: botStorage,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (_req: any, file: any, cb: any) => {
+    if (file.mimetype === 'application/zip' || file.originalname.toLowerCase().endsWith('.zip')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers ZIP sont acceptés'), false);
+    }
+  },
+});
+
+async function notifyAdmins(title: string, message: string, link = '/admin/bots') {
+  try {
+    const admins = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPERADMIN'] } },
+      select: { id: true },
+    });
+    if (admins.length > 0) {
+      await prisma.notification.createMany({
+        data: admins.map(a => ({ userId: a.id, title, message, link, type: 'INFO' as any })),
+      });
+    }
+  } catch {}
+}
+
+// POST /developer/bots — Submit bot (text)
+developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, platform, tags, version, githubUrl, demoUrl } = req.body;
+    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
+
+    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
+
+    const bot = await prisma.marketplaceBot.create({
+      data: {
+        name,
+        description,
+        platform: platform.toUpperCase() as any,
+        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
+        version: version || '1.0.0',
+        githubUrl: githubUrl || null,
+        demoUrl: demoUrl || null,
+        status: 'PENDING',
+        developerId: profile.id,
+      },
+    });
+
+    await notifyAdmins('🤖 Nouveau bot en attente', `"${name}" soumis — en attente de validation`);
+    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
+  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
+});
+
+// POST /developer/bots/upload — Submit bot with ZIP
+developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, platform, tags, version, githubUrl } = req.body;
+    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
+
+    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
+
+    const setupFile = req.file ? `/uploads/bots/${req.file.filename}` : null;
+
+    const bot = await prisma.marketplaceBot.create({
+      data: {
+        name,
+        description,
+        platform: platform.toUpperCase() as any,
+        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
+        version: version || '1.0.0',
+        githubUrl: githubUrl || null,
+        setupFile,
+        status: 'PENDING',
+        developerId: profile.id,
+      },
+    });
+
+    await notifyAdmins('📦 Nouveau bot ZIP en attente', `"${name}" (avec fichier ZIP) soumis — en attente de validation`);
+    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
+  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
+});
+
+// DELETE /developer/bots/:id
+developerRouter.delete('/bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil développeur non trouvé', 404);
+    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (bot.status === 'PUBLISHED') return sendError(res, 'Impossible de supprimer un bot publié', 400);
+    if (bot.setupFile) {
+      const filePath = path.join('/tmp/xhris-uploads', bot.setupFile.replace('/uploads/', ''));
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    }
+    await prisma.marketplaceBot.delete({ where: { id: bot.id } });
+    sendSuccess(res, null, 'Bot supprimé');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// PATCH /developer/bots/:id
+developerRouter.patch('/bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil non trouvé', 404);
+    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    const allowed = ['name', 'description', 'longDescription', 'tags', 'version', 'githubUrl', 'demoUrl', 'icon'];
+    const data: any = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+    const updated = await prisma.marketplaceBot.update({ where: { id: bot.id }, data });
+    sendSuccess(res, updated, 'Bot mis à jour');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// GET /developer/connector/download
+developerRouter.get('/connector/download', (_req: AuthRequest, res: Response) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="xhrishost-connector.js"');
+  res.send(CONNECTOR_CONTENT);
+});
+
+const CONNECTOR_CONTENT = `/**
+ * XHRIS HOST Connector v1.0
+ * Ajoutez ce fichier à votre bot pour le rendre compatible avec XHRIS HOST.
+ *
+ * Usage:
+ *   const xhris = require('./xhrishost-connector');
+ *   // Au démarrage:
+ *   xhris.onBotStart(sock, 'VOTRE_NUMERO@s.whatsapp.net');
+ *   // Dans votre handler de messages:
+ *   const handled = await xhris.handleCommand(sock, msg);
+ *   if (handled) return;
+ */
+
+const API_BASE = process.env.XHRIS_API_URL || 'https://api.xhrishost.site/api';
+let connectedUser = null;
+let userApiKey = process.env.XHRIS_API_KEY || null;
+
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (userApiKey) headers['x-api-key'] = userApiKey;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const res = await fetch(API_BASE + endpoint, opts);
+    return res.json();
+  } catch (e) {
+    return { success: false, message: 'Erreur réseau' };
+  }
+}
+
+async function onBotStart(sock, ownerJid) {
+  if (!userApiKey) return;
+  try {
+    const res = await apiCall('/users/me');
+    if (res.success) {
+      connectedUser = res.data;
+      const deployType = process.env.XHRIS_DEPLOY_TYPE || 'upload';
+      await sock.sendMessage(ownerJid, { text:
+        '✅ *XHRIS HOSTING Connecté !*\\n\\n' +
+        '👤 Utilisateur: ' + connectedUser.name + '\\n' +
+        '🤖 Bot: ' + (process.env.BOT_NAME || 'Mon Bot') + '\\n' +
+        '📦 Déploiement: ' + (deployType === 'zip' ? '📁 Upload fichier' : '🚀 1-Click Deploy') + '\\n' +
+        '🔑 Clé API: ' + userApiKey.slice(0, 12) + '...' + userApiKey.slice(-4) + '\\n\\n' +
+        'Tapez *.host* pour accéder au menu de gestion.'
+      });
+    }
+  } catch (e) { console.error('[XHRIS connector] onBotStart error:', e.message); }
+}
+
+async function handleCommand(sock, msg) {
+  const text = msg?.message?.conversation ||
+               msg?.message?.extendedTextMessage?.text || '';
+  const jid = msg.key.remoteJid;
+
+  if (text.startsWith('.xhrishost ')) {
+    const key = text.split(' ')[1]?.trim();
+    if (!key) { await sock.sendMessage(jid, { text: '❌ Usage: .xhrishost <votre-clé-api>' }); return true; }
+    userApiKey = key;
+    const res = await apiCall('/users/me');
+    if (res.success) {
+      connectedUser = res.data;
+      await sock.sendMessage(jid, { text:
+        '✅ *XHRIS HOSTING Connecté !*\\n\\n' +
+        '👤 Utilisateur: ' + connectedUser.name + '\\n' +
+        '🤖 Bot: ' + (process.env.BOT_NAME || 'Mon Bot') + '\\n' +
+        '🔑 Clé: ' + key.slice(0, 12) + '...' + key.slice(-4) + '\\n\\n' +
+        'Tapez *.host* pour le menu.'
+      });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ Clé API invalide.' });
+      userApiKey = null;
+    }
+    return true;
+  }
+
+  if (text === '.host') {
+    if (!userApiKey || !connectedUser) {
+      await sock.sendMessage(jid, { text: '❌ Non connecté. Utilisez: .xhrishost <clé-api>' });
+      return true;
+    }
+    await sock.sendMessage(jid, { text:
+      '╔══════════════════════╗\\n' +
+      '║  🌐 *XHRIS HOST*     ║\\n' +
+      '╠══════════════════════╣\\n' +
+      '║ .profil — Mon profil  ║\\n' +
+      '║ .coins  — Mes coins   ║\\n' +
+      '║ .serveurs — Serveurs  ║\\n' +
+      '║ .bots   — Mes bots    ║\\n' +
+      '║ .market — Marketplace ║\\n' +
+      '║ .historique — Txns    ║\\n' +
+      '║ .transfert — Coins    ║\\n' +
+      '║ .acheter — Acheter    ║\\n' +
+      '╚══════════════════════╝'
+    });
+    return true;
+  }
+
+  if (text === '.profil') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/users/me');
+    if (res.success) {
+      const u = res.data;
+      await sock.sendMessage(jid, { text:
+        '👤 *Profil XHRIS HOST*\\n\\n' +
+        '📛 Nom: ' + u.name + '\\n' +
+        '📧 Email: ' + u.email + '\\n' +
+        '💰 Coins: ' + u.coins + '\\n' +
+        '⭐ Niveau: ' + u.level + ' (' + u.xp + ' XP)\\n' +
+        '📦 Plan: ' + u.plan
+      });
+    }
+    return true;
+  }
+
+  if (text === '.coins') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/coins/balance');
+    if (res.success) await sock.sendMessage(jid, { text: '💰 *Solde:* ' + (res.data.coins || res.data.balance) + ' coins' });
+    return true;
+  }
+
+  if (text === '.serveurs') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/servers');
+    if (res.success) {
+      const servers = res.data?.servers || res.data?.data || [];
+      if (!servers.length) { await sock.sendMessage(jid, { text: '📡 Aucun serveur.' }); return true; }
+      let txt = '📡 *Mes Serveurs*\\n\\n';
+      servers.forEach((s, i) => { txt += (i+1) + '. *' + s.name + '*\\n   ' + s.status + ' | ' + s.plan + '\\n\\n'; });
+      txt += 'Commandes: .start-srv <id> | .stop-srv <id>';
+      await sock.sendMessage(jid, { text: txt });
+    }
+    return true;
+  }
+
+  if (text === '.bots') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/bots');
+    if (res.success) {
+      const bots = res.data?.data || res.data || [];
+      if (!bots.length) { await sock.sendMessage(jid, { text: '🤖 Aucun bot déployé.' }); return true; }
+      let txt = '🤖 *Mes Bots*\\n\\n';
+      bots.forEach((b, i) => { txt += (i+1) + '. *' + b.name + '* [' + b.status + ']\\n   ' + b.platform + '\\n\\n'; });
+      txt += 'Commandes: .start-bot <id> | .stop-bot <id> | .restart-bot <id>';
+      await sock.sendMessage(jid, { text: txt });
+    }
+    return true;
+  }
+
+  if (text === '.market') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/marketplace');
+    if (res.success) {
+      const bots = res.data?.bots || res.data || [];
+      let txt = '🏪 *Marketplace XHRIS HOST*\\n\\n';
+      bots.slice(0, 8).forEach((b, i) => {
+        txt += (i+1) + '. *' + b.name + '* ⭐' + b.rating + '\\n   ' + (b.description || '').slice(0, 40) + '...\\n\\n';
+      });
+      await sock.sendMessage(jid, { text: txt });
+    }
+    return true;
+  }
+
+  if (text === '.historique') {
+    if (!userApiKey) return false;
+    const res = await apiCall('/coins/transactions?limit=10');
+    if (res.success) {
+      const txs = res.data?.transactions || res.data?.data || [];
+      let txt = '📜 *Historique (10 dernières)*\\n\\n';
+      txs.forEach(t => { txt += (t.amount > 0 ? '➕' : '➖') + ' ' + Math.abs(t.amount) + ' — ' + t.description + '\\n'; });
+      await sock.sendMessage(jid, { text: txt });
+    }
+    return true;
+  }
+
+  if (text.startsWith('.transfert ')) {
+    if (!userApiKey) return false;
+    const parts = text.split(' ');
+    const recipientId = parts[1]; const amount = parseInt(parts[2]);
+    if (!recipientId || !amount || amount <= 0) { await sock.sendMessage(jid, { text: '❌ Usage: .transfert <userId> <montant>' }); return true; }
+    const res = await apiCall('/coins/transfer', 'POST', { recipientId, amount });
+    await sock.sendMessage(jid, { text: res.success ? '✅ ' + amount + ' coins envoyés à ' + recipientId : '❌ ' + (res.message || 'Erreur') });
+    return true;
+  }
+
+  if (text.startsWith('.start-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/start', 'POST'); await sock.sendMessage(jid, { text: res.success ? '✅ Bot démarré' : '❌ ' + res.message }); return true; }
+  if (text.startsWith('.stop-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/stop', 'POST'); await sock.sendMessage(jid, { text: res.success ? '✅ Bot arrêté' : '❌ ' + res.message }); return true; }
+  if (text.startsWith('.restart-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/restart', 'POST'); await sock.sendMessage(jid, { text: res.success ? '✅ Bot redémarré' : '❌ ' + res.message }); return true; }
+  if (text.startsWith('.start-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id + '/start', 'POST'); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur démarré' : '❌ ' + res.message }); return true; }
+  if (text.startsWith('.stop-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id + '/stop', 'POST'); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur arrêté' : '❌ ' + res.message }); return true; }
+  if (text.startsWith('.delete-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id, 'DELETE'); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur supprimé' : '❌ ' + res.message }); return true; }
+
+  if (text === '.acheter') {
+    await sock.sendMessage(jid, { text:
+      '💳 *Acheter des Coins*\\n\\n' +
+      'Rendez-vous sur:\\n🔗 https://xhrishost.site/dashboard/coins/buy\\n\\n' +
+      'Moyens acceptés:\\n• 📱 Mobile Money (Fapshi)\\n• 💳 Carte bancaire\\n• 🏦 GeniusPay'
+    });
+    return true;
+  }
+
+  return false;
+}
+
+module.exports = { handleCommand, apiCall, onBotStart };
+`;
 
 // ========== API KEYS ==========
 export const apiKeysRouter = Router();
@@ -395,6 +740,78 @@ paymentsRouter.post('/geniuspay/initiate', async (req: AuthRequest, res: Respons
       sendSuccess(res, { reference, checkoutUrl: null }, 'GeniusPay non configuré — mode dev');
     }
   } catch (err) { sendError(res, 'Erreur GeniusPay', 500); }
+});
+
+// POST /api/payments/fapshi/webhook — NO AUTH (called by Fapshi)
+paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
+  try {
+    const { transId, status, externalId } = req.body;
+    if (!externalId) return res.json({ success: true });
+
+    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+
+    let paymentStatus = status;
+    if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
+      try {
+        const verifyRes = await fetch(`https://live.fapshi.com/payment-status/${transId}`, {
+          headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
+        });
+        const d: any = await verifyRes.json();
+        paymentStatus = d?.status || status;
+      } catch {}
+    }
+
+    const PACK_COINS: Record<string, number> = {
+      'pack-100': 100, 'pack-250': 250, 'pack-500': 500, 'pack-1000': 1000, 'pack-2500': 2500,
+    };
+
+    if (paymentStatus === 'SUCCESSFUL') {
+      const payment = await prisma.payment.findUnique({ where: { reference: externalId } });
+      if (payment && payment.status === 'PENDING') {
+        const coins = payment.packId ? (PACK_COINS[payment.packId] || 0) : 0;
+        await prisma.$transaction([
+          prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
+          ...(coins > 0 ? [
+            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
+            prisma.transaction.create({
+              data: {
+                userId: payment.userId,
+                type: 'PURCHASE' as any,
+                amount: coins,
+                description: `Achat ${coins} coins via Fapshi Mobile Money`,
+                reference: externalId,
+              },
+            }),
+            prisma.notification.create({
+              data: {
+                userId: payment.userId,
+                title: '✅ Paiement confirmé',
+                message: `${coins} coins ont été ajoutés à votre compte via Mobile Money`,
+                type: 'PAYMENT' as any,
+                link: '/dashboard/coins',
+              },
+            }),
+          ] : []),
+        ]);
+      }
+    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
+      await prisma.payment.updateMany({
+        where: { reference: externalId, status: 'PENDING' },
+        data: { status: 'FAILED' },
+      });
+    }
+    res.json({ success: true });
+  } catch { res.status(500).json({ success: false }); }
+});
+
+// GET /api/payments/fapshi/verify/:reference
+paymentsRouter.get('/fapshi/verify/:reference', async (req: any, res: Response) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
+    if (!payment) return sendError(res, 'Paiement non trouvé', 404);
+    sendSuccess(res, { status: payment.status, reference: payment.reference, amount: payment.amount, packId: payment.packId });
+  } catch { sendError(res, 'Erreur', 500); }
 });
 
 // POST /api/payments/geniuspay/webhook — Receive GeniusPay webhook (no auth)

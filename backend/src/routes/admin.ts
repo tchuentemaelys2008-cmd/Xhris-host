@@ -637,4 +637,119 @@ router.post('/messages/:id/reply', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
+// ============ MARKETPLACE BOTS ============
+
+router.get('/marketplace-bots', async (req: AuthRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const status = req.query.status as string;
+    const platform = req.query.platform as string;
+
+    const where: any = {};
+    if (status) where.status = status.toUpperCase();
+    if (platform) where.platform = platform.toUpperCase();
+
+    const [bots, total] = await Promise.all([
+      prisma.marketplaceBot.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          developer: {
+            include: {
+              user: { select: { id: true, name: true, email: true, avatar: true } },
+            },
+          },
+        },
+      }),
+      prisma.marketplaceBot.count({ where }),
+    ]);
+    sendPaginated(res, bots, total, page, limit);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+router.get('/marketplace-bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.marketplaceBot.findUnique({
+      where: { id: req.params.id },
+      include: {
+        developer: {
+          include: {
+            user: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+        },
+      },
+    });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    sendSuccess(res, bot);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Response) => {
+  try {
+    const { status, reason } = req.body;
+    if (!status || !['PUBLISHED', 'REJECTED'].includes(status.toUpperCase())) {
+      return sendError(res, 'Status invalide (PUBLISHED ou REJECTED)', 400);
+    }
+    const newStatus = status.toUpperCase() as 'PUBLISHED' | 'REJECTED';
+
+    const bot = await prisma.marketplaceBot.findUnique({
+      where: { id: req.params.id },
+      include: {
+        developer: {
+          include: { user: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+
+    await prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: newStatus } });
+
+    await prisma.notification.create({
+      data: {
+        userId: bot.developer.user.id,
+        title: newStatus === 'PUBLISHED' ? '✅ Bot approuvé !' : '❌ Bot rejeté',
+        message: newStatus === 'PUBLISHED'
+          ? `Votre bot "${bot.name}" est maintenant publié sur le marketplace !`
+          : `Votre bot "${bot.name}" a été rejeté.${reason ? ` Raison: ${reason}` : ''}`,
+        type: newStatus === 'PUBLISHED' ? 'SUCCESS' as any : 'WARNING' as any,
+        link: '/developer/publications',
+      },
+    });
+
+    sendSuccess(res, null, newStatus === 'PUBLISHED' ? 'Bot approuvé et publié' : 'Bot rejeté');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// Legacy route — keep for backward compat
+router.post('/bots/:id/review', async (req: AuthRequest, res: Response) => {
+  req.params.id = req.params.id;
+  const { status, reason } = req.body;
+  if (!status || !['PUBLISHED', 'REJECTED', 'approved', 'rejected'].includes(status)) {
+    return sendError(res, 'Status invalide', 400);
+  }
+  const mapped = status === 'approved' ? 'PUBLISHED' : status === 'rejected' ? 'REJECTED' : status.toUpperCase();
+  try {
+    const bot = await prisma.marketplaceBot.findUnique({
+      where: { id: req.params.id },
+      include: { developer: { include: { user: { select: { id: true } } } } },
+    });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    await prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: mapped as any } });
+    if (bot.developer?.user?.id) {
+      await prisma.notification.create({
+        data: {
+          userId: bot.developer.user.id,
+          title: mapped === 'PUBLISHED' ? '✅ Bot approuvé' : '❌ Bot rejeté',
+          message: mapped === 'PUBLISHED' ? `"${bot.name}" est publié sur le marketplace` : `"${bot.name}" a été rejeté${reason ? `: ${reason}` : ''}`,
+          type: mapped === 'PUBLISHED' ? 'SUCCESS' as any : 'WARNING' as any,
+        },
+      });
+    }
+    sendSuccess(res, null, 'Review soumise');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
 export default router;

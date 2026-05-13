@@ -183,6 +183,8 @@ model MarketplaceBot {
   status          MarketplaceBotStatus @default(PENDING)
   coinsPerDay     Int                 @default(10)
   setupFile       String?
+  githubUrl       String?
+  demoUrl         String?
   envTemplate     Json                @default("{}")
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -52,6 +53,34 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
     });
     if (deployedToday >= 10) return sendError(res, 'Limite de déploiements quotidiens atteinte (10/jour)', 400);
 
+    // Auto-generate API key if user doesn't have one
+    let apiKeyValue: string | null = null;
+    const existingKey = await prisma.apiKey.findFirst({
+      where: { userId: req.user!.id, status: 'ACTIVE' },
+      select: { key: true },
+    });
+    if (!existingKey) {
+      apiKeyValue = `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
+      await prisma.apiKey.create({
+        data: {
+          userId: req.user!.id,
+          name: `Clé auto — ${name}`,
+          key: apiKeyValue,
+          permissions: ['read', 'write', 'bots', 'servers', 'coins'],
+        },
+      });
+    } else {
+      apiKeyValue = existingKey.key;
+    }
+
+    const mergedEnvVars = {
+      ...(envVars || {}),
+      XHRIS_API_KEY: apiKeyValue,
+      XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
+      BOT_NAME: name,
+      XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
+    };
+
     const bot = await prisma.bot.create({
       data: {
         name,
@@ -59,7 +88,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
         status: 'STARTING',
         userId: req.user!.id,
         sessionLink,
-        envVars: envVars || {},
+        envVars: mergedEnvVars,
         coinsPerDay: 10,
       },
     });
@@ -77,7 +106,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
       } catch {}
     }, 5000);
 
-    sendSuccess(res, bot, 'Bot en cours de déploiement', 201);
+    sendSuccess(res, { ...bot, apiKey: apiKeyValue }, 'Bot en cours de déploiement', 201);
   } catch (err) {
     sendError(res, 'Erreur lors du déploiement', 500);
   }

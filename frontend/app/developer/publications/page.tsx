@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import {
   Plus, Eye, BarChart2, Upload, BookOpen, CheckCircle,
   Clock, XCircle, Loader2, Bot, Download, Coins, Zap,
-  Trash2, Edit, FileArchive, X,
+  Trash2, Edit, FileArchive, X, Code2,
 } from 'lucide-react';
 import { developerApi } from '@/lib/api';
 import { formatDateTime, cn } from '@/lib/utils';
@@ -55,10 +55,24 @@ export default function PublicationsPage() {
     });
 
   const submitMutation = useMutation({
-    mutationFn: () => developerApi.submitBot({
-      ...form,
-      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-    }),
+    mutationFn: () => {
+      if (zipFile) {
+        const fd = new FormData();
+        fd.append('name', form.name);
+        fd.append('description', form.description);
+        fd.append('platform', form.platform);
+        fd.append('tags', form.tags);
+        fd.append('version', form.version);
+        if (form.githubUrl) fd.append('githubUrl', form.githubUrl);
+        if (form.demoUrl) fd.append('demoUrl', form.demoUrl);
+        fd.append('botZip', zipFile);
+        return developerApi.submitBotWithFile(fd);
+      }
+      return developerApi.submitBot({
+        ...form,
+        tags: form.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['dev-publications'] });
       setShowForm(false);
@@ -85,10 +99,19 @@ export default function PublicationsPage() {
           <h1 className="text-2xl font-bold text-white">Mes Publications</h1>
           <p className="text-gray-400 text-sm mt-1">Gérez, suivez et monétisez vos bots publiés.</p>
         </div>
-        <button onClick={() => setShowForm(true)}
-          className="btn-primary flex items-center gap-2 self-start sm:self-auto">
-          <Plus className="w-4 h-4" /> Nouveau bot
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <a
+            href="/api/developer/connector/download"
+            download="xhrishost-connector.js"
+            className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 text-gray-300 rounded-lg hover:bg-white/10 text-sm transition-colors"
+          >
+            <Code2 className="w-4 h-4" /> Connector
+          </a>
+          <button onClick={() => setShowForm(true)}
+            className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Nouveau bot
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

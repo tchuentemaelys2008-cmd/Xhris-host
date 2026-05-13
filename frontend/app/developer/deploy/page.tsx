@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Star, Download, CheckCircle, ArrowRight, Zap, ExternalLink, Bot,
-  MessageSquare, Music, Smartphone, Settings, Wrench, BookOpen, Loader2,
+  MessageSquare, Music, Smartphone, Settings, Wrench, BookOpen, Loader2, Copy, Key,
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
@@ -38,6 +38,8 @@ export default function DeployBotPage() {
   const [selectedServer, setSelectedServer] = useState('');
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [deploying, setDeploying] = useState(false);
+  const [generatedApiKey, setGeneratedApiKey] = useState<string | null>(null);
+  const [deployedBot, setDeployedBot] = useState<any>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['marketplace-bots'],
@@ -50,11 +52,31 @@ export default function DeployBotPage() {
   const handleDeploy = async () => {
     if (!selectedBot || !selectedServer) return;
     setDeploying(true);
-    setTimeout(() => {
-      setDeploying(false);
-      setCurrentStep(5);
-      toast.success(`Bot déployé ! +${selectedBot.coinsPerDeploy || 2} coins crédités au développeur`);
-    }, 3000);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
+      const res = await fetch('/api/bots/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: selectedBot.name,
+          platform: selectedBot.platform || 'WHATSAPP',
+          envVars,
+          marketplaceBotId: selectedBot.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDeployedBot(data.data);
+        if (data.data?.apiKey) setGeneratedApiKey(data.data.apiKey);
+        setCurrentStep(5);
+        toast.success('Bot déployé avec succès !');
+      } else {
+        toast.error(data.message || 'Erreur lors du déploiement');
+      }
+    } catch {
+      toast.error('Erreur de connexion');
+    }
+    setDeploying(false);
   };
 
   return (
@@ -296,17 +318,60 @@ export default function DeployBotPage() {
 
           {/* Step 5: Success */}
           {currentStep === 5 && (
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-10">
-              <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="w-10 h-10 text-green-400" />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4">
+              <div className="text-center py-6">
+                <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle className="w-10 h-10 text-green-400" />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">Votre bot est en ligne !</h2>
+                <p className="text-gray-400 mb-1">{selectedBot?.name} a été déployé avec succès.</p>
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Votre bot est en ligne !</h2>
-              <p className="text-gray-400 mb-2">{selectedBot?.name} a été déployé avec succès.</p>
-              <p className="text-green-400 text-sm mb-8">+{selectedBot?.coinsPerDeploy || 2} coins crédités à {selectedBot?.developer}</p>
-              <div className="flex gap-3 justify-center">
+
+              {/* API Key card */}
+              {generatedApiKey && (
+                <div className="bg-[#111118] border border-yellow-500/30 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Key className="w-4 h-4 text-yellow-400" />
+                    <span className="text-sm font-semibold text-yellow-400">Clé API générée</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-3">
+                    ⚠️ Sauvegardez cette clé maintenant — elle ne sera plus affichée en clair.
+                    Elle est déjà injectée dans les variables d&apos;environnement de votre bot.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs font-mono text-gray-200 bg-black/40 px-3 py-2 rounded-lg truncate">
+                      {generatedApiKey}
+                    </code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(generatedApiKey); toast.success('Clé copiée !'); }}
+                      className="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 text-gray-400 flex-shrink-0"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Connector info */}
+              <div className="bg-[#111118] border border-purple-500/20 rounded-xl p-4 text-sm">
+                <p className="text-gray-400 mb-2">
+                  Incluez <code className="text-purple-400">xhrishost-connector.js</code> dans votre bot pour accéder aux commandes de gestion via WhatsApp.
+                </p>
+                <a
+                  href="/api/developer/connector/download"
+                  download="xhrishost-connector.js"
+                  className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-xs"
+                >
+                  <Download className="w-3.5 h-3.5" /> Télécharger le Connector
+                </a>
+              </div>
+
+              <div className="flex gap-3 justify-center pt-2">
                 <Link href="/dashboard/bots" className="btn-primary flex items-center gap-2">Voir mes bots</Link>
-                <button onClick={() => { setCurrentStep(1); setSelectedBot(null); setSelectedServer(''); }}
-                  className="btn-secondary">Déployer un autre bot</button>
+                <button
+                  onClick={() => { setCurrentStep(1); setSelectedBot(null); setSelectedServer(''); setGeneratedApiKey(null); }}
+                  className="btn-secondary"
+                >Déployer un autre bot</button>
               </div>
             </motion.div>
           )}
