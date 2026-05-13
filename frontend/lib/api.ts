@@ -74,7 +74,7 @@ export const userApi = {
 // ─────────────────────────────────────────────────────────────────────────────
 export const botsApi = {
   getAll: (params?: any) => apiClient.get('/bots', { params }),
-  deploy: (data: any) => apiClient.post('/bots', data),
+  deploy: (data: any) => apiClient.post('/bots/deploy', data),
   start: (id: string) => apiClient.post(`/bots/${id}/start`),
   stop: (id: string) => apiClient.post(`/bots/${id}/stop`),
   restart: (id: string) => apiClient.post(`/bots/${id}/restart`),
@@ -109,8 +109,8 @@ export const serversApi = {
 // marketplaceApi
 // ─────────────────────────────────────────────────────────────────────────────
 export const marketplaceApi = {
-  getAll: (params?: any) => apiClient.get('/marketplace', { params }),
-  getOne: (slug: string) => apiClient.get(`/marketplace/${slug}`),
+  getAll: (params?: any) => apiClient.get('/marketplace/bots', { params }),
+  getOne: (id: string) => apiClient.get(`/marketplace/bots/${id}`),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

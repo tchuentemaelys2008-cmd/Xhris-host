@@ -60,8 +60,12 @@ export default function DeployBotPage() {
         body: JSON.stringify({
           name: selectedBot.name,
           platform: selectedBot.platform || 'WHATSAPP',
-          envVars,
+          envVars: {
+            ...envVars,
+            ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}),
+          },
           marketplaceBotId: selectedBot.id,
+          sessionLink: envVars.SESSION_SECRET || '',
         }),
       });
       const data = await res.json();
