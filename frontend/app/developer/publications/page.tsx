@@ -207,9 +207,11 @@ export default function PublicationsPage() {
 
       {/* Submit bot modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-4 overflow-y-auto">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-lg my-4">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
+            className="bg-[#111118] border border-white/10 rounded-t-2xl sm:rounded-2xl w-full max-w-lg flex flex-col"
+            style={{ maxHeight: '92vh' }}>
+          <div className="flex-1 overflow-y-auto p-5 sm:p-6">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-semibold text-white">Soumettre un bot</h3>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white">
@@ -316,7 +318,9 @@ export default function PublicationsPage() {
               </div>
             </div>
 
-            <div className="flex gap-3 mt-5">
+            </div>{/* end scrollable content */}
+            {/* Sticky footer with action buttons */}
+            <div className="flex gap-3 p-4 sm:p-5 border-t border-white/10 flex-shrink-0">
               <button onClick={() => setShowForm(false)} className="btn-secondary flex-1">Annuler</button>
               <button
                 onClick={() => submitMutation.mutate()}

@@ -762,14 +762,13 @@ paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
       } catch {}
     }
 
-    const PACK_COINS: Record<string, number> = {
-      'pack-100': 100, 'pack-250': 250, 'pack-500': 500, 'pack-1000': 1000, 'pack-2500': 2500,
-    };
-
     if (paymentStatus === 'SUCCESSFUL') {
       const payment = await prisma.payment.findUnique({ where: { reference: externalId } });
       if (payment && payment.status === 'PENDING') {
-        const coins = payment.packId ? (PACK_COINS[payment.packId] || 0) : 0;
+        const pack = payment.packId
+          ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
+          : null;
+        const coins = pack ? (pack.coins + (pack.bonus || 0)) : Math.floor((payment.amount || 0) * 10);
         await prisma.$transaction([
           prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
           ...(coins > 0 ? [

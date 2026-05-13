@@ -186,6 +186,13 @@ export const adminApi = {
     apiClient.post(`/admin/messages/${id}/reply`, { content: reply }),
   getSubscriptions: (params?: any) =>
     apiClient.get('/admin/subscriptions', { params }),
+  // Marketplace bots management
+  getMarketplaceBots: (params?: any) =>
+    apiClient.get('/admin/marketplace-bots', { params }),
+  getMarketplaceBot: (id: string) =>
+    apiClient.get(`/admin/marketplace-bots/${id}`),
+  reviewMarketplaceBot: (id: string, status: 'PUBLISHED' | 'REJECTED', reason?: string) =>
+    apiClient.post(`/admin/marketplace-bots/${id}/review`, { status, reason }),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
