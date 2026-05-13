@@ -59,7 +59,8 @@ export default function ServerDetailPage() {
     refetchInterval: 5000,
   });
 
-  const server = (data as any)?.data || (data as any);
+  const rawBody = (data as any)?.data;
+  const server = rawBody?.data || rawBody;
 
   // Fetch stats
   const { data: statsData } = useQuery({
