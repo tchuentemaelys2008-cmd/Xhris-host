@@ -1,0 +1,10 @@
+node_modules
+.claude
+.env
+.env.local
+.env*.local
+frontend/.next
+frontend/out
+backend/dist
+*.log
+backend/logs/
