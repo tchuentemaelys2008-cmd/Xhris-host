@@ -13,6 +13,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAx
 
 
 const MOCK_CHART = [1,2,3,4,5,6,7].map((i) => ({ v: Math.random() * 100 }));
+const ALERTS = [{ id: 1, type: "warning", message: "CPU élevé sur serveur-01", time: "il y a 5 min" }, { id: 2, type: "error", message: "Serveur-03 hors ligne", time: "il y a 12 min" }];
 export default function AdminServersPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
