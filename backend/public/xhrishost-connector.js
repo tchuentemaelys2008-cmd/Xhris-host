@@ -1,5 +1,5 @@
 /**
- * XHRIS HOST Connector v1.0
+ * XHRIS HOST Connector v1.1
  * Ajoutez ce fichier à votre bot pour le rendre compatible avec XHRIS HOST.
  *
  * Usage:
@@ -15,7 +15,10 @@
 
 const API_BASE = process.env.XHRIS_API_URL || 'https://api.xhrishost.site/api';
 let connectedUser = null;
-let userApiKey = process.env.XHRIS_API_KEY || null;
+
+// La clé API est UNIQUEMENT lue depuis les variables d'environnement
+// Elle ne peut pas être modifiée via une commande WhatsApp (sécurité)
+const userApiKey = process.env.XHRIS_API_KEY || null;
 
 async function apiCall(endpoint, method = 'GET', body = null) {
   const headers = { 'Content-Type': 'application/json' };
@@ -42,8 +45,7 @@ async function onBotStart(sock, ownerJid) {
           '✅ *XHRIS HOSTING Connecté !*\n\n' +
           '👤 Utilisateur: ' + connectedUser.name + '\n' +
           '🤖 Bot: ' + (process.env.BOT_NAME || 'Mon Bot') + '\n' +
-          '📦 Déploiement: ' + (deployType === '1click' ? '🚀 1-Click Deploy' : '📁 Upload fichier') + '\n' +
-          '🔑 Clé API: ' + userApiKey.slice(0, 12) + '...' + userApiKey.slice(-4) + '\n\n' +
+          '📦 Déploiement: ' + (deployType === '1click' ? '🚀 1-Click Deploy' : '📁 Upload fichier') + '\n\n' +
           'Tapez *.host* pour accéder au menu de gestion.',
       });
     }
@@ -59,34 +61,17 @@ async function handleCommand(sock, msg) {
     '';
   const jid = msg.key.remoteJid;
 
-  if (text.startsWith('.xhrishost ')) {
-    const key = text.split(' ')[1]?.trim();
-    if (!key) {
-      await sock.sendMessage(jid, { text: '❌ Usage: .xhrishost <votre-clé-api>' });
-      return true;
-    }
-    userApiKey = key;
-    const res = await apiCall('/users/me');
-    if (res.success) {
-      connectedUser = res.data;
-      await sock.sendMessage(jid, {
-        text:
-          '✅ *XHRIS HOSTING Connecté !*\n\n' +
-          '👤 Utilisateur: ' + connectedUser.name + '\n' +
-          '🤖 Bot: ' + (process.env.BOT_NAME || 'Mon Bot') + '\n' +
-          '🔑 Clé: ' + key.slice(0, 12) + '...' + key.slice(-4) + '\n\n' +
-          'Tapez *.host* pour le menu.',
-      });
-    } else {
-      await sock.sendMessage(jid, { text: '❌ Clé API invalide.' });
-      userApiKey = null;
-    }
+  // Commande .xhrishost — la clé est gérée par le serveur, pas modifiable ici
+  if (text.startsWith('.xhrishost')) {
+    await sock.sendMessage(jid, {
+      text: '🔒 La clé API est configurée automatiquement par le serveur.\nTapez *.host* pour le menu.',
+    });
     return true;
   }
 
   if (text === '.host') {
-    if (!userApiKey || !connectedUser) {
-      await sock.sendMessage(jid, { text: '❌ Non connecté. Utilisez: .xhrishost <clé-api>' });
+    if (!userApiKey) {
+      await sock.sendMessage(jid, { text: '❌ Aucune clé API configurée sur ce bot.' });
       return true;
     }
     await sock.sendMessage(jid, {
@@ -139,14 +124,9 @@ async function handleCommand(sock, msg) {
     const res = await apiCall('/servers');
     if (res.success) {
       const servers = res.data?.servers || res.data?.data || [];
-      if (!servers.length) {
-        await sock.sendMessage(jid, { text: '📡 Aucun serveur.' });
-        return true;
-      }
+      if (!servers.length) { await sock.sendMessage(jid, { text: '📡 Aucun serveur.' }); return true; }
       let txt = '📡 *Mes Serveurs*\n\n';
-      servers.forEach((s, i) => {
-        txt += (i + 1) + '. *' + s.name + '*\n   ' + s.status + ' | ' + s.plan + '\n\n';
-      });
+      servers.forEach((s, i) => { txt += (i + 1) + '. *' + s.name + '*\n   ' + s.status + ' | ' + s.plan + '\n\n'; });
       txt += 'Cmds: .start-srv <id> | .stop-srv <id>';
       await sock.sendMessage(jid, { text: txt });
     }
@@ -158,14 +138,9 @@ async function handleCommand(sock, msg) {
     const res = await apiCall('/bots');
     if (res.success) {
       const bots = res.data?.data || res.data || [];
-      if (!bots.length) {
-        await sock.sendMessage(jid, { text: '🤖 Aucun bot déployé.' });
-        return true;
-      }
+      if (!bots.length) { await sock.sendMessage(jid, { text: '🤖 Aucun bot déployé.' }); return true; }
       let txt = '🤖 *Mes Bots*\n\n';
-      bots.forEach((b, i) => {
-        txt += (i + 1) + '. *' + b.name + '* [' + b.status + ']\n   ' + b.platform + '\n\n';
-      });
+      bots.forEach((b, i) => { txt += (i + 1) + '. *' + b.name + '* [' + b.status + ']\n   ' + b.platform + '\n\n'; });
       txt += 'Cmds: .start-bot <id> | .stop-bot <id> | .restart-bot <id>';
       await sock.sendMessage(jid, { text: txt });
     }
@@ -192,9 +167,7 @@ async function handleCommand(sock, msg) {
     if (res.success) {
       const txs = res.data?.transactions || res.data?.data || [];
       let txt = '📜 *Historique (10 dernières)*\n\n';
-      txs.forEach(t => {
-        txt += (t.amount > 0 ? '➕' : '➖') + ' ' + Math.abs(t.amount) + ' — ' + t.description + '\n';
-      });
+      txs.forEach(t => { txt += (t.amount > 0 ? '➕' : '➖') + ' ' + Math.abs(t.amount) + ' — ' + t.description + '\n'; });
       await sock.sendMessage(jid, { text: txt });
     }
     return true;
@@ -205,14 +178,9 @@ async function handleCommand(sock, msg) {
     const parts = text.split(' ');
     const recipientId = parts[1];
     const amount = parseInt(parts[2]);
-    if (!recipientId || !amount || amount <= 0) {
-      await sock.sendMessage(jid, { text: '❌ Usage: .transfert <userId> <montant>' });
-      return true;
-    }
+    if (!recipientId || !amount || amount <= 0) { await sock.sendMessage(jid, { text: '❌ Usage: .transfert <userId> <montant>' }); return true; }
     const res = await apiCall('/coins/transfer', 'POST', { recipientId, amount });
-    await sock.sendMessage(jid, {
-      text: res.success ? '✅ ' + amount + ' coins envoyés à ' + recipientId : '❌ ' + (res.message || 'Erreur'),
-    });
+    await sock.sendMessage(jid, { text: res.success ? '✅ ' + amount + ' coins envoyés' : '❌ ' + (res.message || 'Erreur') });
     return true;
   }
 
@@ -234,6 +202,15 @@ async function handleCommand(sock, msg) {
   }
 
   return false;
+}
+
+// Auto-log au chargement du module
+if (userApiKey) {
+  console.log('[XHRIS HOST] ✅ Connector v1.1 chargé — Clé API détectée');
+  console.log('[XHRIS HOST] Commandes: .host .profil .coins .bots .serveurs .market');
+  console.log('[XHRIS HOST] Appelez xhris.onBotStart(sock, ownerJid) au démarrage pour le message de bienvenue');
+} else {
+  console.warn('[XHRIS HOST] ⚠️  Connector chargé sans clé API (XHRIS_API_KEY non définie)');
 }
 
 module.exports = { handleCommand, apiCall, onBotStart };

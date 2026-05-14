@@ -41,40 +41,47 @@ router.get('/packs', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-// POST /api/coins/purchase
+// POST /api/coins/purchase — Creates a PENDING payment, does NOT credit coins
+// Coins are credited only after webhook confirmation (Fapshi/GeniusPay)
 router.post('/purchase', async (req: AuthRequest, res: Response) => {
   try {
     const { packId, method } = req.body;
     if (!packId || !method) return sendError(res, 'Pack et méthode requis', 400);
 
-    const defaultPacks: Record<string, any> = {
-      'pack-100': { coins: 100, price: 2.49 },
-      'pack-250': { coins: 250, price: 4.99 },
-      'pack-500': { coins: 500, price: 9.99 },
-      'pack-1000': { coins: 1000, price: 17.99 },
-      'pack-2500': { coins: 2500, price: 39.99 },
-    };
-
-    const pack = defaultPacks[packId];
+    // Try DB first, fallback to defaults
+    let pack: any = await (prisma as any).creditPack.findUnique({ where: { id: packId } }).catch(() => null);
+    if (!pack) {
+      const defaults: Record<string, any> = {
+        'pack-100': { coins: 100, bonus: 0, price: 2.49 },
+        'pack-250': { coins: 250, bonus: 0, price: 4.99 },
+        'pack-500': { coins: 500, bonus: 50, price: 9.99 },
+        'pack-1000': { coins: 1000, bonus: 100, price: 17.99 },
+        'pack-2500': { coins: 2500, bonus: 500, price: 39.99 },
+      };
+      pack = defaults[packId];
+    }
     if (!pack) return sendError(res, 'Pack invalide', 400);
 
-    // In production: process real payment here
     const reference = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: req.user!.id }, data: { coins: { increment: pack.coins } } }),
-      prisma.transaction.create({
-        data: {
-          userId: req.user!.id,
-          type: 'PURCHASE',
-          description: `Achat de ${pack.coins} Coins`,
-          amount: pack.coins,
-          reference,
-        },
-      }),
-    ]);
+    // Create PENDING payment only — coins are credited by Fapshi/GeniusPay webhook
+    await prisma.payment.create({
+      data: {
+        userId: req.user!.id,
+        amount: pack.price || pack.coins,
+        method: method.toUpperCase() as any,
+        reference,
+        packId,
+        status: 'PENDING',
+      },
+    });
 
-    sendSuccess(res, { coins: pack.coins, reference }, `${pack.coins} Coins ajoutés à votre compte`);
+    sendSuccess(res, {
+      reference,
+      coins: pack.coins + (pack.bonus || 0),
+      price: pack.price,
+      message: 'Paiement initié. Utilisez /payments/fapshi/initiate pour finaliser.',
+    }, 'Paiement en attente de confirmation');
   } catch (err) {
     sendError(res, 'Erreur lors de l\'achat', 500);
   }

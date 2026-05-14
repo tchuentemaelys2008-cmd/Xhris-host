@@ -10,6 +10,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import multer from 'multer';
 import path from 'path';
+import crypto from 'crypto';
 import fs from 'fs';
 
 const execAsync = promisify(exec);
@@ -295,7 +296,28 @@ router.post('/:id/deploy', async (req: AuthRequest, res: Response) => {
     const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!server) return sendError(res, 'Serveur non trouvé', 404);
     if (server.status !== 'ONLINE') return sendError(res, 'Serveur hors ligne — démarrez le d\'abord', 400);
-    await deployFilesToContainer(server.id);
+
+    // Récupérer ou créer la clé API pour injecter le connector
+    let apiKeyRecord = await prisma.apiKey.findFirst({
+      where: { userId: req.user!.id, status: 'ACTIVE' },
+      select: { key: true },
+    });
+    if (!apiKeyRecord) {
+      const newKey = `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
+      apiKeyRecord = await prisma.apiKey.create({
+        data: { userId: req.user!.id, name: `Clé auto — ${server.name}`, key: newKey, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
+        select: { key: true },
+      });
+    }
+
+    const xhrisEnvVars = {
+      XHRIS_API_KEY: apiKeyRecord.key,
+      XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
+      BOT_NAME: server.name,
+      XHRIS_DEPLOY_TYPE: 'server-upload',
+    };
+
+    await deployFilesToContainer(server.id, xhrisEnvVars);
     sendSuccess(res, null, 'Déploiement lancé');
   } catch (err: any) {
     sendError(res, err?.message || 'Erreur déploiement', 500);

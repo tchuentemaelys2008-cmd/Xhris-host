@@ -11,6 +11,16 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
+function maskEnvVars(envVars: any): any {
+  if (!envVars || typeof envVars !== 'object') return envVars;
+  const safe = { ...envVars };
+  const PROTECTED = ['XHRIS_API_KEY', 'SESSION_SECRET', 'OPENAI_API_KEY'];
+  PROTECTED.forEach(k => {
+    if (safe[k]) safe[k] = '***' + String(safe[k]).slice(-4);
+  });
+  return safe;
+}
+
 // GET /api/bots
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
@@ -23,7 +33,8 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       prisma.bot.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
       prisma.bot.count({ where }),
     ]);
-    sendPaginated(res, bots, total, page, limit);
+    const safeBots = bots.map(b => ({ ...b, envVars: maskEnvVars(b.envVars) }));
+    sendPaginated(res, safeBots, total, page, limit);
   } catch { sendError(res, 'Erreur', 500); }
 });
 
@@ -32,7 +43,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return sendError(res, 'Bot non trouvé', 404);
-    sendSuccess(res, bot);
+    sendSuccess(res, { ...bot, envVars: maskEnvVars(bot.envVars) });
   } catch { sendError(res, 'Erreur', 500); }
 });
 
@@ -219,8 +230,13 @@ router.patch('/:id/env', async (req: AuthRequest, res: Response) => {
     const { vars } = req.body;
     const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
     if (!bot) return sendError(res, 'Bot non trouvé', 404);
-    const updated = await prisma.bot.update({ where: { id: bot.id }, data: { envVars: vars } });
-    sendSuccess(res, updated, 'Variables d\'environnement mises à jour');
+    // Protect system keys — restore original values even if user tries to overwrite
+    const PROTECTED = ['XHRIS_API_KEY', 'XHRIS_API_URL', 'XHRIS_DEPLOY_TYPE', 'BOT_NAME'];
+    const existingEnv = (bot.envVars as any) || {};
+    const safeVars = { ...vars };
+    PROTECTED.forEach(k => { if (existingEnv[k]) safeVars[k] = existingEnv[k]; });
+    const updated = await prisma.bot.update({ where: { id: bot.id }, data: { envVars: safeVars } });
+    sendSuccess(res, { ...updated, envVars: maskEnvVars(updated.envVars) }, 'Variables mises à jour');
   } catch { sendError(res, 'Erreur', 500); }
 });
 

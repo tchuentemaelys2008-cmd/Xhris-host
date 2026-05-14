@@ -66,11 +66,27 @@ export async function getContainerLogs(serverId: string): Promise<string[]> {
   }
 }
 
-export async function deployFilesToContainer(serverId: string): Promise<void> {
+export async function deployFilesToContainer(
+  serverId: string,
+  envVars?: Record<string, string>,
+): Promise<void> {
   const containerName = `xhris-server-${serverId}`;
   const dir = path.join('/tmp', 'xhris-uploads', serverId);
 
   if (!fs.existsSync(dir)) throw new Error('Aucun fichier à déployer — uploadez des fichiers d\'abord');
+
+  // Inject connector if not present
+  const connectorDest = path.join(dir, 'xhrishost-connector.js');
+  if (!fs.existsSync(connectorDest)) {
+    const connectorSrc = path.join(__dirname, '../../public/xhrishost-connector.js');
+    if (fs.existsSync(connectorSrc)) fs.copyFileSync(connectorSrc, connectorDest);
+  }
+
+  // Inject .env file if env vars provided
+  if (envVars && Object.keys(envVars).length > 0) {
+    const envContent = Object.entries(envVars).map(([k, v]) => `${k}=${v}`).join('\n');
+    fs.writeFileSync(path.join(dir, '.env'), envContent);
+  }
 
   await execAsync(`docker cp ${dir}/. ${containerName}:/app/`);
 
@@ -80,8 +96,23 @@ export async function deployFilesToContainer(serverId: string): Promise<void> {
 
   if (!entry) return;
 
+  // npm install if package.json exists
+  if (files.includes('package.json')) {
+    await execAsync(
+      `docker exec ${containerName} sh -c "cd /app && npm install --production --silent 2>&1"`,
+    ).catch(() => {});
+  }
+
+  // Build env export string for the run command
+  let envExport = '';
+  if (envVars && Object.keys(envVars).length > 0) {
+    envExport = Object.entries(envVars)
+      .map(([k, v]) => `export ${k}="${v.replace(/"/g, '\\"')}"`)
+      .join('; ') + '; ';
+  }
+
   const runCmd = entry.endsWith('.py') ? `python3 /app/${entry}` : `node /app/${entry}`;
   await execAsync(
-    `docker exec ${containerName} sh -c "pkill -f 'node /app' 2>/dev/null; pkill -f 'python3 /app' 2>/dev/null; sleep 1; nohup ${runCmd} > /app/app.log 2>&1 &"`,
+    `docker exec ${containerName} sh -c "pkill -f 'node /app' 2>/dev/null; pkill -f 'python3 /app' 2>/dev/null; sleep 1; ${envExport}nohup ${runCmd} > /app/app.log 2>&1 &"`,
   ).catch(() => {});
 }
