@@ -8,8 +8,8 @@ import { useEffect, useState } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { Bot, Server, Coins, Zap, ArrowRight, Copy, Loader2, Crown, Newspaper, Users, Gift, CheckCircle } from 'lucide-react';
-import { userApi, coinsApi } from '@/lib/api';
+import { Bot, Server, Coins, Zap, ArrowRight, Copy, Loader2, Crown, Newspaper, Users, Gift, CheckCircle, MessageCircle, X } from 'lucide-react';
+import { userApi, coinsApi, apiClient } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useSettings } from '@/lib/settingsContext';
@@ -51,6 +51,11 @@ export default function DashboardPage() {
   const qc = useQueryClient();
   const user = session?.user as any;
   const [activeStep, setActiveStep] = useState(0);
+  const [verifyRequestId, setVerifyRequestId] = useState<string | null>(null);
+  const [verifyCode, setVerifyCode] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyCopied, setVerifyCopied] = useState(false);
 
   const DEPLOY_STEPS = [t('dashboard.deploy_step1', 'Choisir un bot'), t('dashboard.deploy_step2', 'Configurer'), t('dashboard.deploy_step3', 'Déployer')];
 
@@ -60,6 +65,26 @@ export default function DashboardPage() {
     }, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Detect ?verify=<requestId> for WhatsApp verification popup
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const reqId = params.get('verify');
+    if (!reqId || !user) return;
+    setVerifyRequestId(reqId);
+    setVerifyLoading(true);
+    setVerifyError(null);
+    apiClient.get(`/auth/whatsapp/code/${reqId}`)
+      .then((res) => {
+        const d = (res.data as any)?.data;
+        setVerifyCode(d?.code || null);
+      })
+      .catch((err) => {
+        setVerifyError(err?.response?.data?.message || 'Erreur lors de la récupération du code');
+      })
+      .finally(() => setVerifyLoading(false));
+  }, [user]);
 
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats'],
@@ -121,6 +146,65 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* WhatsApp Verification Popup */}
+      {verifyRequestId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.92 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#111118] border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative"
+          >
+            <button
+              onClick={() => { setVerifyRequestId(null); setVerifyCode(null); setVerifyError(null); }}
+              className="absolute top-3 right-3 text-gray-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">Authentification WhatsApp</h3>
+                <p className="text-xs text-gray-400">Votre code de connexion</p>
+              </div>
+            </div>
+
+            {verifyLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+              </div>
+            ) : verifyError ? (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-center">
+                <p className="text-red-400 text-sm">{verifyError}</p>
+                <p className="text-gray-500 text-xs mt-2">Tapez à nouveau .xhrishost dans WhatsApp</p>
+              </div>
+            ) : verifyCode ? (
+              <>
+                <p className="text-gray-400 text-sm mb-3 text-center">
+                  Envoyez ce code dans votre chat WhatsApp avec le bot:
+                </p>
+                <div className="bg-[#1A1A24] border border-white/10 rounded-xl p-4 flex items-center justify-between mb-4">
+                  <span className="text-3xl font-bold tracking-[0.3em] text-white">{verifyCode}</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(verifyCode);
+                      setVerifyCopied(true);
+                      setTimeout(() => setVerifyCopied(false), 2000);
+                    }}
+                    className="ml-3 px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded-lg text-purple-300 text-sm flex items-center gap-1.5 transition-all"
+                  >
+                    {verifyCopied ? <CheckCircle className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                    {verifyCopied ? 'Copié !' : 'Copier'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 text-center">⏱️ Ce code expire dans 3 minutes</p>
+              </>
+            ) : null}
+          </motion.div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>

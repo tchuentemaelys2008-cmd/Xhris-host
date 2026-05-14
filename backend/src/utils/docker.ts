@@ -103,16 +103,15 @@ export async function deployFilesToContainer(
     ).catch(() => {});
   }
 
-  // Build env export string for the run command
-  let envExport = '';
-  if (envVars && Object.keys(envVars).length > 0) {
-    envExport = Object.entries(envVars)
-      .map(([k, v]) => `export ${k}="${v.replace(/"/g, '\\"')}"`)
-      .join('; ') + '; ';
-  }
-
+  // Write start.sh that sources .env so env vars persist across container restarts
   const runCmd = entry.endsWith('.py') ? `python3 /app/${entry}` : `node /app/${entry}`;
+  const startSh = `#!/bin/sh\n[ -f /app/.env ] && export $(grep -v '^#' /app/.env | xargs)\nexec ${runCmd} >> /app/app.log 2>&1\n`;
+  const startShPath = path.join(dir, 'start.sh');
+  fs.writeFileSync(startShPath, startSh);
+  await execAsync(`docker cp ${startShPath} ${containerName}:/app/start.sh`);
+  await execAsync(`docker exec ${containerName} chmod +x /app/start.sh`).catch(() => {});
+
   await execAsync(
-    `docker exec ${containerName} sh -c "pkill -f 'node /app' 2>/dev/null; pkill -f 'python3 /app' 2>/dev/null; sleep 1; ${envExport}nohup ${runCmd} > /app/app.log 2>&1 &"`,
+    `docker exec ${containerName} sh -c "pkill -f 'node /app' 2>/dev/null; pkill -f 'python3 /app' 2>/dev/null; sleep 1; nohup /app/start.sh &"`,
   ).catch(() => {});
 }

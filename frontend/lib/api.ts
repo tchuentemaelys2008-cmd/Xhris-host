@@ -176,8 +176,10 @@ export const adminApi = {
   addCoins: (id: string, amount: number, reason: string) =>
     apiClient.post(`/admin/users/${id}/coins`, { amount, reason }),
   getBots: (params?: any) => apiClient.get('/admin/bots', { params }),
-  reviewBot: (id: string, status: 'approved' | 'rejected') =>
-    apiClient.post(`/admin/bots/${id}/review`, { status }),
+  reviewBot: (id: string, status: 'approved' | 'rejected') => {
+    const mapped = status === 'approved' ? 'PUBLISHED' : 'REJECTED';
+    return apiClient.post(`/admin/bots/${id}/review`, { status: mapped });
+  },
   getServers: (params?: any) => apiClient.get('/admin/servers', { params }),
   restartServer: (id: string) =>
     apiClient.post(`/admin/servers/${id}/restart`),

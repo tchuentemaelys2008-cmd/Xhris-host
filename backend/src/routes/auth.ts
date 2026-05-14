@@ -254,4 +254,107 @@ router.post('/logout', authMiddleware, async (req: AuthRequest, res: Response) =
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WhatsApp Verification Flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/auth/whatsapp/request — Connector requests a code (no auth)
+router.post('/whatsapp/request', async (req: Request, res: Response) => {
+  try {
+    const { whatsappJid } = req.body;
+    if (!whatsappJid) return sendError(res, 'WhatsApp JID requis', 400);
+
+    // Cooldown: 1 minute between requests from same JID
+    const oneMinuteAgo = new Date(Date.now() - 60_000);
+    const recent = await (prisma as any).whatsAppVerification.findFirst({
+      where: { whatsappJid, createdAt: { gte: oneMinuteAgo } },
+    });
+    if (recent) return sendError(res, 'Attendez 1 minute avant de demander un nouveau code', 429);
+
+    const code = String(Math.floor(100_000 + Math.random() * 900_000));
+    const { randomUUID } = await import('crypto');
+    const requestId = randomUUID();
+    const expiresAt = new Date(Date.now() + 3 * 60_000);
+
+    await (prisma as any).whatsAppVerification.create({
+      data: { requestId, code, whatsappJid, expiresAt },
+    });
+
+    // Clean up expired codes (fire and forget)
+    (prisma as any).whatsAppVerification.deleteMany({ where: { expiresAt: { lt: new Date() } } }).catch(() => {});
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+    sendSuccess(res, {
+      requestId,
+      verifyLink: `${frontendUrl}/dashboard?verify=${requestId}`,
+      expiresIn: 180,
+    }, 'Code de vérification créé');
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
+// GET /api/auth/whatsapp/code/:requestId — Dashboard fetches the code (JWT auth required)
+router.get('/whatsapp/code/:requestId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const verification = await (prisma as any).whatsAppVerification.findUnique({
+      where: { requestId: req.params.requestId },
+    });
+    if (!verification) return sendError(res, 'Demande non trouvée', 404);
+    if (verification.status !== 'PENDING') return sendError(res, 'Code déjà utilisé', 400);
+    if (verification.expiresAt < new Date()) {
+      await (prisma as any).whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+      return sendError(res, 'Code expiré', 410);
+    }
+    // Link code to the authenticated user
+    await (prisma as any).whatsAppVerification.update({
+      where: { id: verification.id },
+      data: { userId: req.user!.id },
+    });
+    sendSuccess(res, { code: verification.code, expiresAt: verification.expiresAt, whatsappJid: verification.whatsappJid });
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
+// POST /api/auth/whatsapp/verify — Connector submits the code (no auth)
+router.post('/whatsapp/verify', async (req: Request, res: Response) => {
+  try {
+    const { requestId, code, whatsappJid } = req.body;
+    if (!requestId || !code) return sendError(res, 'RequestId et code requis', 400);
+
+    const verification = await (prisma as any).whatsAppVerification.findUnique({ where: { requestId } });
+    if (!verification) return sendError(res, 'Demande non trouvée', 404);
+    if (verification.status !== 'PENDING') return sendError(res, 'Code déjà utilisé', 400);
+    if (verification.expiresAt < new Date()) {
+      await (prisma as any).whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+      return sendError(res, 'Code expiré — retapez .xhrishost', 410);
+    }
+    if (verification.code !== code) return sendError(res, 'Code incorrect', 401);
+    if (!verification.userId) return sendError(res, 'Ouvrez le lien dans votre navigateur pour valider le code', 400);
+
+    await (prisma as any).whatsAppVerification.update({
+      where: { id: verification.id },
+      data: { status: 'VERIFIED', whatsappJid: whatsappJid || verification.whatsappJid },
+    });
+
+    // Get or create API key for this user
+    const userId = verification.userId;
+    let apiKey = await prisma.apiKey.findFirst({ where: { userId, status: 'ACTIVE' }, select: { key: true } });
+    if (!apiKey) {
+      const { randomBytes } = await import('crypto');
+      const newKey = `xhs_live_${randomBytes(20).toString('hex')}`;
+      apiKey = await prisma.apiKey.create({
+        data: { userId, name: 'Clé WhatsApp auto', key: newKey, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
+        select: { key: true },
+      });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, coins: true, plan: true } });
+    sendSuccess(res, { apiKey: apiKey.key, user }, 'Connexion WhatsApp réussie');
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
 export default router;

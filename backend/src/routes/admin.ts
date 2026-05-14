@@ -588,11 +588,16 @@ router.get('/security/logs', async (req: AuthRequest, res: Response) => {
 router.post('/bots/:id/review', async (req: AuthRequest, res: Response) => {
   try {
     const { status, reason } = req.body;
+    const statusMap: Record<string, string> = {
+      approved: 'PUBLISHED', APPROVED: 'PUBLISHED', PUBLISHED: 'PUBLISHED',
+      rejected: 'REJECTED', REJECTED: 'REJECTED',
+    };
+    const mapped = statusMap[status] || status.toUpperCase();
     await prisma.marketplaceBot.update({
       where: { id: req.params.id },
-      data: { status: status.toUpperCase() as any },
+      data: { status: mapped as any },
     });
-    sendSuccess(res, null, `Bot ${status === 'approved' ? 'approuvé' : 'rejeté'}`);
+    sendSuccess(res, null, `Bot ${mapped === 'PUBLISHED' ? 'approuvé' : 'rejeté'}`);
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
