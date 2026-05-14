@@ -1,7 +1,7 @@
 import { Router, Response, Request } from 'express';
 import { AuthRequest, authMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
-import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import { sendSuccess, sendError } from '../utils/response';
 
 const router = Router();
 
@@ -23,15 +23,26 @@ router.get('/bots', async (req: Request, res: Response) => {
 
     const orderBy: any = sort === 'rating' ? { rating: 'desc' } : sort === 'newest' ? { createdAt: 'desc' } : { downloads: 'desc' };
 
-    const [bots, total] = await Promise.all([
+    const [bots, total, activeDevelopers] = await Promise.all([
       prisma.marketplaceBot.findMany({
         where, orderBy, skip: (page-1)*limit, take: limit,
         include: { developer: { select: { displayName: true, verified: true } } },
       }),
       prisma.marketplaceBot.count({ where }),
+      prisma.developerProfile.count({ where: { bots: { some: { status: 'PUBLISHED' } } } }),
     ]);
 
-    sendPaginated(res, bots, total, page, limit);
+    res.json({
+      success: true,
+      data: bots,
+      bots,
+      stats: {
+        totalBots: total,
+        totalDeploys: bots.reduce((sum, bot) => sum + (bot.downloads || 0), 0),
+        activeDevelopers,
+      },
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }
