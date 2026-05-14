@@ -1,9 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 
-// Toujours utiliser /api (relatif) — Next.js rewrites dans next.config.mjs
-// proxy vers BACKEND_URL (Railway en prod, localhost:3001 en dev).
-// Ne jamais définir NEXT_PUBLIC_API_URL vers Railway : ça causerait du CORS.
-const BASE_URL = '/api';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
