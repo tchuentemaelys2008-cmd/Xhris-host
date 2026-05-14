@@ -101,6 +101,14 @@ app.use('/api/servers', authMiddleware, serverRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/coins', authMiddleware, coinsRoutes);
 app.use('/api/community', authMiddleware, communityRoutes);
+
+// Public developer route — no auth required (browser <a href> link, no token sent)
+app.get('/api/developer/connector/download', (_req, res) => {
+  const filePath = path.join(__dirname, '../public/xhrishost-connector.js');
+  if (!require('fs').existsSync(filePath)) return res.status(404).json({ success: false, message: 'Fichier non trouvé' });
+  res.download(filePath, 'xhrishost-connector.js');
+});
+
 app.use('/api/developer', authMiddleware, developerRoutes);
 app.use('/api/api-keys', authMiddleware, apiKeyRoutes);
 app.use('/api/webhooks', authMiddleware, webhookRoutes);

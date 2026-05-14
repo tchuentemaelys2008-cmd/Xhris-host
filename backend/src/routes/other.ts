@@ -181,12 +181,7 @@ developerRouter.patch('/bots/:id', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
-// GET /developer/connector/download
-developerRouter.get('/connector/download', (_req: AuthRequest, res: Response) => {
-  const filePath = path.join(__dirname, '../../public/xhrishost-connector.js');
-  if (!fs.existsSync(filePath)) return sendError(res, 'Connector non disponible', 404);
-  res.download(filePath, 'xhrishost-connector.js');
-});
+// Connector download is served publicly from index.ts before authMiddleware
 
 
 // ========== API KEYS ==========
