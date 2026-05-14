@@ -6,7 +6,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Bot, Copy, Zap, ArrowLeft, Loader2, CheckCircle, MessageCircle, Plus } from 'lucide-react';
-import { marketplaceApi, botsApi } from '@/lib/api';
+import { extractApiList, marketplaceApi, botsApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 function AddBotRequestBanner({ user }: { user: any }) {
@@ -64,8 +64,7 @@ export default function DeployBotPage() {
     enabled: !!user,
   });
 
-  const _rawBots = (marketData as any)?.data?.bots ?? (marketData as any)?.data;
-  const bots: any[] = Array.isArray(_rawBots) ? _rawBots : [];
+  const bots = extractApiList(marketData, 'bots');
 
   const deployMutation = useMutation({
     mutationFn: () => botsApi.deploy({

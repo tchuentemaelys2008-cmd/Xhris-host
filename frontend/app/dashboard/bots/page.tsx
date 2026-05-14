@@ -8,7 +8,7 @@ import {
   Bot, Play, Square, RefreshCw, Trash2, Terminal, Settings,
   Zap, Plus, Search, Loader2, CheckCircle, XCircle, Clock
 } from 'lucide-react';
-import { botsApi } from '@/lib/api';
+import { botsApi, extractApiList } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { useSettings } from '@/lib/settingsContext';
 
@@ -33,8 +33,7 @@ export default function BotsPage() {
     enabled: !!user,
   });
 
-  const _rawBots = (data as any)?.data?.bots ?? (data as any)?.data;
-  const bots: any[] = Array.isArray(_rawBots) ? _rawBots : [];
+  const bots = extractApiList(data, 'bots');
 
   const startMutation = useMutation({
     mutationFn: (id: string) => botsApi.start(id),

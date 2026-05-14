@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { marketplaceApi } from '@/lib/api';
+import { extractApiList, marketplaceApi } from '@/lib/api';
 
 const STEPS = [
   { n: 1, label: 'Choisir un bot', sub: 'Sélectionnez le bot à déployer' },
@@ -46,8 +46,7 @@ export default function DeployBotPage() {
     queryFn: () => marketplaceApi.getAll({ sort: 'popular' }),
   });
 
-  const _raw_bots = (data as any)?.data?.bots ?? (data as any)?.data ?? [];
-  const bots: any[] = Array.isArray(_raw_bots) ? _raw_bots : [];
+  const bots = extractApiList(data, 'bots');
 
   const handleDeploy = async () => {
     if (!selectedBot || !selectedServer) return;

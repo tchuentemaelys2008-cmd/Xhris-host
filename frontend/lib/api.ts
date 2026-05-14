@@ -8,6 +8,14 @@ export const apiClient: AxiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+export const extractApiData = (response: any) => response?.data?.data ?? response?.data ?? response;
+
+export const extractApiList = (response: any, key?: string): any[] => {
+  const payload = extractApiData(response);
+  const value = key && payload && typeof payload === 'object' ? payload[key] : payload;
+  return Array.isArray(value) ? value : [];
+};
+
 apiClient.interceptors.request.use(async (config) => {
   if (typeof window !== 'undefined') {
     let token = localStorage.getItem('auth_token');

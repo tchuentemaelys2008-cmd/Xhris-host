@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { marketplaceApi } from '@/lib/api';
+import { extractApiData, marketplaceApi } from '@/lib/api';
 
 type Step = 'select' | 'download' | 'configure' | 'server' | 'deploy';
 
@@ -33,7 +33,7 @@ export default function BotDetailPage({ params }: { params: { slug: string } }) 
     queryFn: () => marketplaceApi.getOne(params.slug),
   });
 
-  const bot = (data as any)?.data || null;
+  const bot = extractApiData(data) || null;
 
   const handleDownload = async () => {
     try {

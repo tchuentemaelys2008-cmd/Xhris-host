@@ -11,7 +11,7 @@ import {
   Clock, Info,
 } from 'lucide-react';
 import Link from 'next/link';
-import { marketplaceApi } from '@/lib/api';
+import { extractApiList, marketplaceApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 const CATEGORIES = [
@@ -67,8 +67,7 @@ export default function MarketplacePage() {
     queryFn: () => marketplaceApi.getAll({ category: activeCategory, sort, search: searchQuery }),
   });
 
-  const _raw_bots = (data as any)?.data?.bots ?? (data as any)?.data ?? [];
-  const bots: any[] = Array.isArray(_raw_bots) ? _raw_bots : [];
+  const bots = extractApiList(data, 'bots');
   const _raw_leaderboard = (data as any)?.data?.topDevelopers ?? [];
   const leaderboard: any[] = Array.isArray(_raw_leaderboard) ? _raw_leaderboard : [];
   const _raw_recentActivity = (data as any)?.data?.recentActivity ?? [];
