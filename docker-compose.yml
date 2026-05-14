@@ -70,7 +70,8 @@ services:
       - "3001:3001"
     volumes:
       - backend_logs:/app/logs
-      - bot_files:/app/uploads
+      - bot_uploads:/tmp/xhris-uploads
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - xhris_network
     healthcheck:
@@ -125,7 +126,7 @@ volumes:
   postgres_data:
   redis_data:
   backend_logs:
-  bot_files:
+  bot_uploads:
   nginx_logs:
 
 networks:

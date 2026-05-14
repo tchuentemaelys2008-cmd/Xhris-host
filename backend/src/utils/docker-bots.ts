@@ -38,8 +38,10 @@ export async function deployBotContainer(
     writeDefaultIndex(appDir, botId, platform);
   }
 
+  const sourceDir = resolveAppDir(appDir);
+
   // Inject connector if not present
-  const connectorDest = `${appDir}/xhrishost-connector.js`;
+  const connectorDest = `${sourceDir}/xhrishost-connector.js`;
   if (!fs.existsSync(connectorDest)) {
     const connectorSrc = path.join(__dirname, '../../public/xhrishost-connector.js');
     if (fs.existsSync(connectorSrc)) fs.copyFileSync(connectorSrc, connectorDest);
@@ -51,28 +53,49 @@ export async function deployBotContainer(
     .map(([k, v]) => `-e "${k}=${v.replace(/"/g, '\\"')}"`)
     .join(' ');
 
-  const files = fs.readdirSync(appDir);
+  const files = fs.readdirSync(sourceDir);
   const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
   const entry = candidates.find(e => files.includes(e)) || files.find(f => f.endsWith('.js')) || 'index.js';
   const hasPackageJson = files.includes('package.json');
 
-  const startCmd = hasPackageJson
-    ? `cd /app && npm install --production --silent 2>&1 && node ${entry}`
-    : `cd /app && node ${entry}`;
+  const startSh = [
+    '#!/bin/sh',
+    'set -e',
+    hasPackageJson ? 'npm install --production --silent 2>&1' : '',
+    `exec node ${entry}`,
+    '',
+  ].filter(Boolean).join('\n');
+  fs.writeFileSync(path.join(sourceDir, 'start.sh'), startSh);
 
-  const cmd = [
-    'docker run -d',
+  const createCmd = [
+    `${DOCKER} create`,
     `--name ${containerName}`,
     '--memory=256m --cpus=0.25',
     '--restart unless-stopped',
-    `-v ${appDir}:/app`,
     envFlags,
     'node:20-alpine',
-    `sh -c "${startCmd.replace(/"/g, '\\"')}"`,
+    'sh',
+    '-c',
+    `"cd /app && chmod +x /app/start.sh && /app/start.sh"`,
   ].join(' ');
 
-  const { stdout } = await execAsync(cmd);
-  return stdout.trim();
+  const { stdout } = await execAsync(createCmd);
+  const containerId = stdout.trim();
+  await execAsync(`${DOCKER} cp "${sourceDir}" ${containerName}:/app`);
+  await execAsync(`${DOCKER} start ${containerName}`);
+  return containerId;
+}
+
+function resolveAppDir(appDir: string): string {
+  const rootFiles = fs.readdirSync(appDir);
+  const candidates = ['package.json', 'index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
+  if (rootFiles.some(f => candidates.includes(f))) return appDir;
+
+  const directories = rootFiles
+    .map(name => path.join(appDir, name))
+    .filter(full => fs.existsSync(full) && fs.statSync(full).isDirectory());
+
+  return directories.length === 1 ? directories[0] : appDir;
 }
 
 function writeDefaultIndex(appDir: string, botId: string, platform: string) {

@@ -51,10 +51,15 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 router.post('/deploy', async (req: AuthRequest, res: Response) => {
   try {
     const { name, platform, sessionLink, envVars, marketplaceBotId } = req.body;
-    if (!name) return sendError(res, 'Nom du bot requis', 400);
+    const marketplaceBot = marketplaceBotId
+      ? await prisma.marketplaceBot.findFirst({ where: { id: marketplaceBotId, status: 'PUBLISHED' } }).catch(() => null)
+      : null;
+    const botName = name || marketplaceBot?.name;
+    if (!botName) return sendError(res, 'Nom du bot requis', 400);
 
+    const deployCost = marketplaceBot?.coinsPerDay || 10;
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
-    if (!user || user.coins < 10) return sendError(res, 'Coins insuffisants (10 requis)', 400);
+    if (!user || user.coins < deployCost) return sendError(res, `Coins insuffisants (${deployCost} requis)`, 400);
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const deployedToday = await prisma.transaction.count({
@@ -71,7 +76,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
     if (!existingKey) {
       apiKeyValue = `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
       await prisma.apiKey.create({
-        data: { userId: req.user!.id, name: `Clé auto — ${name}`, key: apiKeyValue, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
+        data: { userId: req.user!.id, name: `Clé auto — ${botName}`, key: apiKeyValue, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
       });
     } else {
       apiKeyValue = existingKey.key;
@@ -81,42 +86,39 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
       ...(envVars || {}),
       XHRIS_API_KEY: apiKeyValue || '',
       XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
-      BOT_NAME: name,
+      BOT_NAME: botName,
       XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
     };
 
     // Fetch marketplace bot info if provided
-    if (marketplaceBotId) {
-      const mb = await prisma.marketplaceBot.findUnique({ where: { id: marketplaceBotId } }).catch(() => null);
-      if (mb) {
-        if (mb.githubUrl) mergedEnvVars.GITHUB_URL = mb.githubUrl;
-        if (mb.setupFile) mergedEnvVars.SETUP_FILE_PATH = mb.setupFile;
+    if (marketplaceBotId && marketplaceBot) {
+        if (marketplaceBot.githubUrl) mergedEnvVars.GITHUB_URL = marketplaceBot.githubUrl;
+        if (marketplaceBot.setupFile) mergedEnvVars.SETUP_FILE_PATH = marketplaceBot.setupFile;
         await prisma.marketplaceBot.update({
           where: { id: marketplaceBotId },
           data: { downloads: { increment: 1 } },
         }).catch(() => {});
-      }
     }
 
     const bot = await prisma.bot.create({
       data: {
-        name,
-        platform: (platform?.toUpperCase() || 'WHATSAPP') as any,
+        name: botName,
+        platform: (platform?.toUpperCase() || marketplaceBot?.platform || 'WHATSAPP') as any,
         status: 'STARTING',
         userId: req.user!.id,
         sessionLink,
         envVars: mergedEnvVars,
-        coinsPerDay: 10,
+        coinsPerDay: deployCost,
       },
     });
 
     await prisma.$transaction([
-      prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: 10 } } }),
-      prisma.transaction.create({ data: { userId: req.user!.id, type: 'DEPLOY_BOT', description: `Déploiement de ${name}`, amount: -10 } }),
+      prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: deployCost } } }),
+      prisma.transaction.create({ data: { userId: req.user!.id, type: 'DEPLOY_BOT', description: `Déploiement de ${botName}`, amount: -deployCost } }),
     ]);
 
     // Real Docker deploy (fire and forget)
-    deployBotContainer(bot.id, platform?.toUpperCase() || 'WHATSAPP', mergedEnvVars)
+    deployBotContainer(bot.id, platform?.toUpperCase() || marketplaceBot?.platform || 'WHATSAPP', mergedEnvVars)
       .then(async (containerId) => {
         await prisma.bot.update({
           where: { id: bot.id },

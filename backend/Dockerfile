@@ -19,7 +19,7 @@ RUN echo "=== dist/index.js preview ===" && head -5 dist/index.js
 FROM base AS runner
 ENV NODE_ENV=production
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl docker-cli git unzip
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 xhris
@@ -31,7 +31,9 @@ COPY --from=builder --chown=xhris:nodejs /app/package.json ./
 
 RUN mkdir -p logs && chown xhris:nodejs logs
 
-USER xhris
+# The backend controls sibling bot/server containers through the mounted Docker
+# socket, which requires root-equivalent access inside this container.
+USER root
 
 EXPOSE 3001
 

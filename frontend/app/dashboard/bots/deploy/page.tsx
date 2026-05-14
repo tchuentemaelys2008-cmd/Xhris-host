@@ -60,7 +60,7 @@ export default function DeployBotPage() {
 
   const { data: marketData, isLoading } = useQuery({
     queryKey: ['marketplace-bots'],
-    queryFn: () => marketplaceApi.getAll({ status: 'approved' }),
+    queryFn: () => marketplaceApi.getAll(),
     enabled: !!user,
   });
 
@@ -139,7 +139,7 @@ export default function DeployBotPage() {
                       </div>
                       <div className="text-xs text-gray-400 mt-0.5">{bot.description}</div>
                     </div>
-                    <div className="text-xs text-purple-400">{bot.dailyCost || 10} Coins/j</div>
+                    <div className="text-xs text-purple-400">{bot.coinsPerDay || 10} Coins/j</div>
                   </div>
                 </button>
               ))}
@@ -187,7 +187,7 @@ export default function DeployBotPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Coût</span>
-                <span className="text-purple-400">{selectedBot?.dailyCost || 10} Coins/jour</span>
+                <span className="text-purple-400">{selectedBot?.coinsPerDay || 10} Coins/jour</span>
               </div>
             </div>
           </div>
@@ -212,7 +212,7 @@ export default function DeployBotPage() {
               Votre bot sera déployé et démarré automatiquement.
             </p>
             <p className="text-purple-400 text-sm mt-2">
-              Coût : {selectedBot?.dailyCost || 10} Coins/jour
+              Coût : {selectedBot?.coinsPerDay || 10} Coins/jour
             </p>
           </div>
 

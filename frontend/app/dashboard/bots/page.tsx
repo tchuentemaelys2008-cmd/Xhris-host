@@ -64,10 +64,11 @@ export default function BotsPage() {
     !search || b.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const running = bots.filter(b => b.status === 'running').length;
-  const stopped = bots.filter(b => b.status === 'stopped').length;
-  const starting = bots.filter(b => b.status === 'starting').length;
-  const totalCoins = bots.reduce((acc, b) => acc + (b.dailyCost || b.coins || 0), 0);
+  const statusKey = (status?: string) => String(status || 'stopped').toLowerCase();
+  const running = bots.filter(b => statusKey(b.status) === 'running').length;
+  const stopped = bots.filter(b => statusKey(b.status) === 'stopped').length;
+  const starting = bots.filter(b => statusKey(b.status) === 'starting').length;
+  const totalCoins = bots.reduce((acc, b) => acc + (b.coinsPerDay || b.dailyCost || b.coins || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -129,7 +130,8 @@ export default function BotsPage() {
       ) : (
         <div className="space-y-4">
           {filtered.map((bot, i) => {
-            const st = STATUS_CONFIG[bot.status] || STATUS_CONFIG['stopped'];
+            const normalizedStatus = statusKey(bot.status);
+            const st = STATUS_CONFIG[normalizedStatus] || STATUS_CONFIG['stopped'];
             const isSelected = selectedBot === bot.id;
 
             return (
@@ -161,13 +163,13 @@ export default function BotsPage() {
                         {st.label}
                       </div>
                       {bot.uptime && <span className="text-xs text-gray-500">{bot.uptime}</span>}
-                      <span className="text-xs text-gray-500">{bot.dailyCost || bot.coins || 0} Coins/jour</span>
+                      <span className="text-xs text-gray-500">{bot.coinsPerDay || bot.dailyCost || bot.coins || 0} Coins/jour</span>
                     </div>
                   </div>
 
                   {/* Controls */}
                   <div className="flex items-center gap-2">
-                    {bot.status === 'running' ? (
+                    {normalizedStatus === 'running' ? (
                       <button
                         onClick={() => stopMutation.mutate(bot.id)}
                         disabled={stopMutation.isPending}

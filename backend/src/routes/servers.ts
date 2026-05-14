@@ -15,6 +15,7 @@ import fs from 'fs';
 
 const execAsync = promisify(exec);
 const router = Router();
+const DOCKER = process.env.DOCKER_BIN || '/usr/bin/docker';
 
 const PLAN_SPECS: Record<string, { cpu: number; ram: number; storage: number; coinsPerDay: number }> = {
   STARTER:  { cpu: 1, ram: 1,  storage: 10, coinsPerDay: 10 },
@@ -178,7 +179,7 @@ router.post('/:id/exec', async (req: AuthRequest, res: Response) => {
     if (!command) return sendError(res, 'Commande requise', 400);
     const containerName = `xhris-server-${server.id}`;
     const { stdout, stderr } = await execAsync(
-      `docker exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`,
+      `${DOCKER} exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`,
     ).catch((err: any) => ({ stdout: '', stderr: err.message }));
     sendSuccess(res, { output: stdout || stderr || 'Commande exécutée' });
   } catch { sendError(res, 'Erreur', 500); }
