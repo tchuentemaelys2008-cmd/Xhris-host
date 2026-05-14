@@ -16,6 +16,8 @@ import { signOut } from 'next-auth/react';
 import { coinsApi, notificationsApi, userApi } from '@/lib/api';
 import { SettingsProvider, useSettings } from '@/lib/settingsContext';
 import Footer from '@/components/Footer';
+import PushPrompt from '@/components/PushPrompt';
+import { registerSW } from '@/lib/push';
 
 // ─── SVG Coin Icon ───────────────────────────────────────────────
 function CoinIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -109,6 +111,11 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
   const [premiumDismissed, setPremiumDismissed] = useState(false);
 
   const user = session?.user as any;
+
+  // Register service worker for PWA/push support
+  useEffect(() => {
+    registerSW();
+  }, []);
 
   // ── Détection compte fantôme (session NextAuth sans entrée en DB) ─
   useEffect(() => {
@@ -441,6 +448,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         </main>
         <Footer />
       </div>
+      <PushPrompt />
     </div>
   );
 }

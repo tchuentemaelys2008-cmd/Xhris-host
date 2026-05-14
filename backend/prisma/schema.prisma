@@ -65,6 +65,7 @@ model User {
   withdrawals       Withdrawal[]
   loginHistory          LoginHistory[]
   whatsappVerifications WhatsAppVerification[]
+  pushSubscriptions     PushSubscription[]
 
   @@map("users")
 }
@@ -822,10 +823,26 @@ model WhatsAppVerification {
   userId      String?
   whatsappJid String?
   status      String   @default("PENDING")
+  attempts    Int      @default(0)
   expiresAt   DateTime
   createdAt   DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("whatsapp_verifications")
+}
+
+// ============ PUSH SUBSCRIPTIONS ============
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  platform  String   @default("unknown")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("push_subscriptions")
 }

@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
 import { logger } from '../utils/logger';
+import { sendPushToUser } from '../utils/push';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -233,13 +234,19 @@ export function setupWebSockets(io: Server) {
   logger.info('WebSocket server initialized');
 }
 
-// Helper to send notification via socket
-export async function sendNotification(io: Server, userId: string, notification: { title: string; message: string; type?: string }) {
+// Helper to send notification via socket + push
+export async function sendNotification(io: Server, userId: string, notification: { title: string; message: string; type?: string; link?: string }) {
   try {
     const notif = await prisma.notification.create({
-      data: { userId, title: notification.title, message: notification.message, type: (notification.type || 'INFO') as any },
+      data: { userId, title: notification.title, message: notification.message, type: (notification.type || 'INFO') as any, link: notification.link },
     });
     io.to(`user:${userId}`).emit('notification:new', notif);
+    // Fire-and-forget push notification
+    sendPushToUser(userId, {
+      title: notification.title,
+      body: notification.message,
+      url: notification.link || '/dashboard',
+    }).catch(() => {});
   } catch {}
 }
 

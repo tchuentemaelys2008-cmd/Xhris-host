@@ -38,15 +38,24 @@ export const metadata: Metadata = {
   },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   manifest: '/manifest.json',
-  icons: { icon: '/favicon.ico', apple: '/apple-icon.png' },
+  icons: { icon: '/favicon.ico', apple: '/icon-192.png' },
   verification: { google: process.env.GOOGLE_SITE_VERIFICATION || '' },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'XHRIS Host',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: [{ media: '(prefers-color-scheme: dark)', color: '#0A0A0F' }],
+  themeColor: '#7c3aed',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
 };
 
 interface RootLayoutProps {

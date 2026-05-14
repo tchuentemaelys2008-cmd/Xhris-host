@@ -119,6 +119,15 @@ async function handleCommand(sock, msg) {
     }
 
     awaitingCode.set(jid, res.data.requestId);
+
+    // Auto-cleanup after 3 minutes (code expiry)
+    var capturedRequestId = res.data.requestId;
+    setTimeout(function() {
+      if (awaitingCode.get(jid) === capturedRequestId) {
+        awaitingCode.delete(jid);
+      }
+    }, 3 * 60 * 1000);
+
     await sock.sendMessage(jid, {
       text:
         '🔐 *Authentification XHRIS HOST*\n\n' +

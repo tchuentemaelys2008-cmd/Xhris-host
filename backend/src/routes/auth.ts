@@ -330,6 +330,19 @@ router.post('/whatsapp/verify', async (req: Request, res: Response) => {
       await (prisma as any).whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
       return sendError(res, 'Code expiré — retapez .xhrishost', 410);
     }
+
+    // Anti brute-force: max 5 attempts per requestId
+    if ((verification.attempts || 0) >= 5) {
+      await (prisma as any).whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+      return sendError(res, 'Trop de tentatives — retapez .xhrishost', 429);
+    }
+
+    // Increment attempt counter before checking code
+    await (prisma as any).whatsAppVerification.update({
+      where: { id: verification.id },
+      data: { attempts: { increment: 1 } },
+    });
+
     if (verification.code !== code) return sendError(res, 'Code incorrect', 401);
     if (!verification.userId) return sendError(res, 'Ouvrez le lien dans votre navigateur pour valider le code', 400);
 

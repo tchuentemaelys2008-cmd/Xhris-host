@@ -303,6 +303,8 @@ webhooksRouter.post('/secret/regenerate', async (req: AuthRequest, res: Response
 // ========== NOTIFICATIONS ==========
 export const notificationsRouter = Router();
 
+import { sendPushToUser, VAPID_PUBLIC } from '../utils/push';
+
 notificationsRouter.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -331,6 +333,45 @@ notificationsRouter.post('/read-all', async (req: AuthRequest, res: Response) =>
   try {
     await prisma.notification.updateMany({ where: { userId: req.user!.id, read: false }, data: { read: true } });
     sendSuccess(res, null, 'Toutes les notifications lues');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+notificationsRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.notification.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
+    sendSuccess(res, null, 'Notification supprimée');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// GET /notifications/push/vapid-key — Public VAPID key for frontend subscription
+notificationsRouter.get('/push/vapid-key', (_req: any, res: Response) => {
+  sendSuccess(res, { key: VAPID_PUBLIC });
+});
+
+// POST /notifications/push/subscribe
+notificationsRouter.post('/push/subscribe', async (req: AuthRequest, res: Response) => {
+  try {
+    const { endpoint, keys, platform } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) return sendError(res, 'Subscription invalide', 400);
+
+    await (prisma as any).pushSubscription.upsert({
+      where: { endpoint },
+      update: { p256dh: keys.p256dh, auth: keys.auth, userId: req.user!.id, platform: platform || 'unknown' },
+      create: { userId: req.user!.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, platform: platform || 'unknown' },
+    });
+
+    sendSuccess(res, null, 'Notifications push activées');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// POST /notifications/push/unsubscribe
+notificationsRouter.post('/push/unsubscribe', async (req: AuthRequest, res: Response) => {
+  try {
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await (prisma as any).pushSubscription.deleteMany({ where: { endpoint, userId: req.user!.id } });
+    }
+    sendSuccess(res, null, 'Notifications push désactivées');
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 

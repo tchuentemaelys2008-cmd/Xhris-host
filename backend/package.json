@@ -41,6 +41,7 @@
     "socket.io": "4.7.5",
     "stripe": "16.2.0",
     "uuid": "11",
+    "web-push": "^3.6.7",
     "winston": "3.13.0",
     "winston-daily-rotate-file": "5.0.0",
     "zod": "3.23.8"
@@ -59,6 +60,7 @@
     "@types/passport-google-oauth20": "2.0.16",
     "@types/passport-jwt": "4.0.1",
     "@types/uuid": "^11.0.0",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "7.14.1",
     "@typescript-eslint/parser": "7.14.1",
     "eslint": "8.57.0",
