@@ -34,14 +34,15 @@ router.get('/bots', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: bots,
-      bots,
-      stats: {
-        totalBots: total,
-        totalDeploys: bots.reduce((sum, bot) => sum + (bot.downloads || 0), 0),
-        activeDevelopers,
+      data: {
+        bots,
+        stats: {
+          totalBots: total,
+          totalDeploys: bots.reduce((sum, bot) => sum + (bot.downloads || 0), 0),
+          activeDevelopers,
+        },
+        pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
       },
-      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {
     sendError(res, 'Erreur', 500);
