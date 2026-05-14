@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import {
   Code, Bot, CheckCircle, Clock, XCircle, Zap, Star,
   Upload, ArrowRight, Loader2, BookOpen, Trophy, Gift,
-  FileArchive, X,
+  FileArchive, X, Download,
 } from 'lucide-react';
 import { developerApi } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -176,6 +176,23 @@ export default function DeveloperPage() {
             <div className="text-xs text-gray-400">{step.desc}</div>
           </div>
         ))}
+      </div>
+
+      {/* Connector reminder */}
+      <div className="bg-[#111118] border border-purple-500/20 rounded-xl p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Code className="w-5 h-5 text-purple-400 flex-shrink-0" />
+          <p className="text-sm text-gray-300">
+            Incluez <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded text-xs">xhrishost-connector.js</code> dans votre bot avant de le soumettre.
+          </p>
+        </div>
+        <a
+          href="/api/developer/connector/download"
+          download="xhrishost-connector.js"
+          className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap"
+        >
+          <Download className="w-3.5 h-3.5" /> Télécharger
+        </a>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}

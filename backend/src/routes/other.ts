@@ -86,9 +86,7 @@ async function notifyAdmins(title: string, message: string, link = '/admin/bots'
       select: { id: true },
     });
     if (admins.length > 0) {
-      await prisma.notification.createMany({
-        data: admins.map(a => ({ userId: a.id, title, message, link, type: 'INFO' as any })),
-      });
+      await notifyMany(admins.map(a => a.id), { title, message, type: 'INFO', link });
     }
   } catch {}
 }
@@ -304,6 +302,7 @@ webhooksRouter.post('/secret/regenerate', async (req: AuthRequest, res: Response
 export const notificationsRouter = Router();
 
 import { sendPushToUser, VAPID_PUBLIC } from '../utils/push';
+import { notify, notifyMany } from '../utils/notify';
 
 notificationsRouter.get('/', async (req: AuthRequest, res: Response) => {
   try {
@@ -617,17 +616,16 @@ paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
                 reference: externalId,
               },
             }),
-            prisma.notification.create({
-              data: {
-                userId: payment.userId,
-                title: '✅ Paiement confirmé',
-                message: `${coins} coins ont été ajoutés à votre compte via Mobile Money`,
-                type: 'PAYMENT' as any,
-                link: '/dashboard/coins',
-              },
-            }),
           ] : []),
         ]);
+        if (coins > 0) {
+          await notify(payment.userId, {
+            title: '💰 Paiement reçu !',
+            message: `${coins} coins ont été crédités à votre compte.`,
+            type: 'PAYMENT',
+            link: '/dashboard/coins',
+          });
+        }
       }
     } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
       await prisma.payment.updateMany({

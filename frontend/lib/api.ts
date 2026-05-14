@@ -220,11 +220,12 @@ export const developerApi = {
 // paymentsApi
 // ─────────────────────────────────────────────────────────────────────────────
 export const paymentsApi = {
-  createOrder: (data: { packId: string; method: string; coins: number; amount: number }) =>
-    apiClient.post('/payments/order', data),
-  verifyPayment: (orderId: string) => apiClient.get(`/payments/verify/${orderId}`),
-  getHistory: () => apiClient.get('/payments/history'),
-  getPlans: () => apiClient.get('/payments/plans'),
+  initiate: (data: any) => apiClient.post('/payments/initiate', data),
+  initiateFapshi: (data: any) => apiClient.post('/payments/fapshi/initiate', data),
+  verify: (reference: string) => apiClient.get(`/payments/verify/${reference}`),
+  fapshiVerify: (reference: string) => apiClient.get(`/payments/fapshi/verify/${reference}`),
+  withdraw: (data: any) => apiClient.post('/payments/withdraw', data),
+  getWithdrawals: () => apiClient.get('/payments/withdrawals'),
 };
 
 export default apiClient;

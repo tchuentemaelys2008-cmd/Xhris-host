@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import { notify } from '../utils/notify';
 
 const router = Router();
 
@@ -109,8 +110,22 @@ router.post('/transfer', async (req: AuthRequest, res: Response) => {
       prisma.transaction.create({ data: { userId: req.user!.id, type: 'TRANSFER_SENT', description: `Envoi à @${recipient.name}`, amount: -amount } }),
       prisma.transaction.create({ data: { userId: recipientId, type: 'TRANSFER_RECEIVED', description: `Reçu de @${sender.name || 'Utilisateur'}`, amount } }),
       prisma.coinTransfer.create({ data: { senderId: req.user!.id, receiverId: recipientId, amount, fee } }),
-      prisma.notification.create({ data: { userId: recipientId, title: 'Coins reçus !', message: `Vous avez reçu ${amount} Coins de @${sender.name || 'Utilisateur'}.`, type: 'SUCCESS' } }),
-      prisma.notification.create({ data: { userId: req.user!.id, title: 'Transfert effectué', message: `Votre solde a été réduit de ${total} Coins (${amount} envoyés + ${fee} de frais) à @${recipient.name}.`, type: 'INFO' } }),
+    ]);
+
+    // Push + socket notifications outside the transaction
+    await Promise.all([
+      notify(recipientId, {
+        title: '💰 Coins reçus !',
+        message: `Vous avez reçu ${amount} Coins de @${sender.name || 'Utilisateur'}.`,
+        type: 'SUCCESS',
+        link: '/dashboard/coins',
+      }),
+      notify(req.user!.id, {
+        title: '📤 Transfert effectué',
+        message: `${total} Coins envoyés (${amount} + ${fee} frais) à @${recipient.name}.`,
+        type: 'INFO',
+        link: '/dashboard/coins',
+      }),
     ]);
 
     sendSuccess(res, { amount, recipientName: recipient.name }, `${amount} Coins envoyés avec succès`);

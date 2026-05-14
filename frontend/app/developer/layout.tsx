@@ -11,7 +11,7 @@ import {
   LayoutDashboard, Bot, Server, Store, Rocket, Wallet,
   Code, BookOpen, BarChart3, Trophy, Gift, Users, Star,
   Settings, HelpCircle, LogOut, Bell, Crown, ChevronDown,
-  Zap, Menu, X, Coins,
+  Zap, Menu, X, Coins, Download,
 } from 'lucide-react';
 
 const navSections = [
@@ -34,6 +34,7 @@ const navSections = [
       { href: '/developer/statistics', icon: BarChart3, label: 'Statistiques' },
       { href: '/developer/leaderboard', icon: Trophy, label: 'Classement' },
       { href: '/developer/earnings', icon: Gift, label: 'Gains & Récompenses' },
+      { href: '/api/developer/connector/download', icon: Download, label: 'Connector JS', download: true },
     ]
   },
   {
@@ -124,6 +125,15 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
             <div className="text-[10px] font-semibold text-gray-600 px-3 mb-2 tracking-wider">{section.label}</div>
             <div className="space-y-0.5">
               {section.items.map(item => {
+                if ((item as any).download) {
+                  return (
+                    <a key={item.href} href={item.href} download="xhrishost-connector.js"
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-all">
+                      <item.icon className="w-4 h-4 flex-shrink-0" />
+                      <span className="flex-1">{item.label}</span>
+                    </a>
+                  );
+                }
                 const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
                 return (
                   <Link key={item.href} href={item.href}

@@ -66,6 +66,46 @@ export default function DeveloperHubPage() {
         </div>
       </div>
 
+      {/* XHRIS Connector */}
+      <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-2 flex-1 min-w-[200px]">
+            <h2 className="font-semibold text-white flex items-center gap-2">
+              <Download className="w-5 h-5 text-purple-400" />
+              XHRIS HOST Connector
+            </h2>
+            <p className="text-sm text-gray-400">
+              Ajoutez ce fichier à votre bot WhatsApp pour le rendre compatible avec XHRIS HOST.
+              Il permet aux utilisateurs de gérer leur compte directement depuis WhatsApp
+              (profil, coins, bots, serveurs) via des commandes simples.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <span className="text-xs bg-purple-500/10 text-purple-300 px-2 py-1 rounded-md">Auth par code de vérification</span>
+              <span className="text-xs bg-blue-500/10 text-blue-300 px-2 py-1 rounded-md">Commandes .host .profil .coins</span>
+              <span className="text-xs bg-green-500/10 text-green-300 px-2 py-1 rounded-md">Gestion bots et serveurs</span>
+            </div>
+          </div>
+          <a
+            href="/api/developer/connector/download"
+            download="xhrishost-connector.js"
+            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
+          >
+            <Download className="w-4 h-4" /> Télécharger le Connector
+          </a>
+        </div>
+        <div className="mt-4 bg-black/30 rounded-lg p-4">
+          <p className="text-xs text-gray-400 font-medium mb-2">Utilisation rapide :</p>
+          <pre className="text-xs text-gray-300 overflow-x-auto"><code>{`const xhris = require('./xhrishost-connector');
+
+// Au démarrage du bot :
+await xhris.onBotStart(sock, 'VOTRE_NUMERO@s.whatsapp.net');
+
+// Dans le handler de messages :
+const handled = await xhris.handleCommand(sock, msg);
+if (handled) return; // Commande XHRIS traitée`}</code></pre>
+        </div>
+      </div>
+
       {/* Resources */}
       <div>
         <h2 className="font-semibold text-white mb-4">Ressources</h2>

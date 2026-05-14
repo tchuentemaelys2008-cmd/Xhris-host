@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { AuthRequest, adminMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import { notify } from '../utils/notify';
 
 const router = Router();
 router.use(adminMiddleware);
@@ -712,16 +713,13 @@ router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Respon
 
     await prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: newStatus } });
 
-    await prisma.notification.create({
-      data: {
-        userId: bot.developer.user.id,
-        title: newStatus === 'PUBLISHED' ? '✅ Bot approuvé !' : '❌ Bot rejeté',
-        message: newStatus === 'PUBLISHED'
-          ? `Votre bot "${bot.name}" est maintenant publié sur le marketplace !`
-          : `Votre bot "${bot.name}" a été rejeté.${reason ? ` Raison: ${reason}` : ''}`,
-        type: newStatus === 'PUBLISHED' ? 'SUCCESS' as any : 'WARNING' as any,
-        link: '/developer/publications',
-      },
+    await notify(bot.developer.user.id, {
+      title: newStatus === 'PUBLISHED' ? '✅ Bot approuvé !' : '❌ Bot rejeté',
+      message: newStatus === 'PUBLISHED'
+        ? `Votre bot "${bot.name}" est maintenant publié sur le marketplace !`
+        : `Votre bot "${bot.name}" a été rejeté.${reason ? ` Raison: ${reason}` : ''}`,
+      type: newStatus === 'PUBLISHED' ? 'SUCCESS' : 'WARNING',
+      link: '/developer/publications',
     });
 
     sendSuccess(res, null, newStatus === 'PUBLISHED' ? 'Bot approuvé et publié' : 'Bot rejeté');
@@ -744,13 +742,11 @@ router.post('/bots/:id/review', async (req: AuthRequest, res: Response) => {
     if (!bot) return sendError(res, 'Bot non trouvé', 404);
     await prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: mapped as any } });
     if (bot.developer?.user?.id) {
-      await prisma.notification.create({
-        data: {
-          userId: bot.developer.user.id,
-          title: mapped === 'PUBLISHED' ? '✅ Bot approuvé' : '❌ Bot rejeté',
-          message: mapped === 'PUBLISHED' ? `"${bot.name}" est publié sur le marketplace` : `"${bot.name}" a été rejeté${reason ? `: ${reason}` : ''}`,
-          type: mapped === 'PUBLISHED' ? 'SUCCESS' as any : 'WARNING' as any,
-        },
+      await notify(bot.developer.user.id, {
+        title: mapped === 'PUBLISHED' ? '✅ Bot approuvé' : '❌ Bot rejeté',
+        message: mapped === 'PUBLISHED' ? `"${bot.name}" est publié sur le marketplace` : `"${bot.name}" a été rejeté${reason ? `: ${reason}` : ''}`,
+        type: mapped === 'PUBLISHED' ? 'SUCCESS' : 'WARNING',
+        link: '/developer/publications',
       });
     }
     sendSuccess(res, null, 'Review soumise');

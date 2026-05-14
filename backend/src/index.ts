@@ -11,6 +11,7 @@ import { logger } from './utils/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 import { setupWebSockets } from './websockets';
+import { setIO } from './utils/io-instance';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import botRoutes from './routes/bots';
@@ -111,6 +112,7 @@ app.use('/api/admin', authMiddleware, adminRoutes);
 app.use('*', (_, res) => res.status(404).json({ success: false, message: 'Route not found' }));
 app.use(errorHandler);
 
+setIO(io);
 setupWebSockets(io);
 
 const PORT = parseInt(process.env.PORT || '3001');
