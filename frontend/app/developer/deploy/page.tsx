@@ -362,7 +362,7 @@ export default function DeployBotPage() {
                   Incluez <code className="text-purple-400">xhrishost-connector.js</code> dans votre bot pour accéder aux commandes de gestion via WhatsApp.
                 </p>
                 <a
-                  href="/api/developer/connector/download"
+                  href="/xhrishost-connector.js"
                   download="xhrishost-connector.js"
                   className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-xs"
                 >

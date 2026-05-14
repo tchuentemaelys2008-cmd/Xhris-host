@@ -34,7 +34,7 @@ const navSections = [
       { href: '/developer/statistics', icon: BarChart3, label: 'Statistiques' },
       { href: '/developer/leaderboard', icon: Trophy, label: 'Classement' },
       { href: '/developer/earnings', icon: Gift, label: 'Gains & Récompenses' },
-      { href: '/api/developer/connector/download', icon: Download, label: 'Connector JS', download: true },
+      { href: '/xhrishost-connector.js', icon: Download, label: 'Connector JS', download: true },
     ]
   },
   {

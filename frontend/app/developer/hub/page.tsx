@@ -86,7 +86,7 @@ export default function DeveloperHubPage() {
             </div>
           </div>
           <a
-            href="/api/developer/connector/download"
+            href="/xhrishost-connector.js"
             download="xhrishost-connector.js"
             className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
           >

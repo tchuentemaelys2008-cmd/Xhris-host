@@ -101,7 +101,7 @@ export default function PublicationsPage() {
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <a
-            href="/api/developer/connector/download"
+            href="/xhrishost-connector.js"
             download="xhrishost-connector.js"
             className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 text-gray-300 rounded-lg hover:bg-white/10 text-sm transition-colors"
           >
