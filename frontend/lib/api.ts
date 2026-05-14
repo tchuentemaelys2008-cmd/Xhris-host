@@ -12,6 +12,9 @@ export const extractApiData = (response: any) => response?.data?.data ?? respons
 
 export const extractApiList = (response: any, key?: string): any[] => {
   const payload = extractApiData(response);
+  // Si payload est déjà un tableau, le retourner directement
+  if (Array.isArray(payload)) return payload;
+  // Sinon chercher la clé dans l'objet
   const value = key && payload && typeof payload === 'object' ? payload[key] : payload;
   return Array.isArray(value) ? value : [];
 };
