@@ -156,6 +156,35 @@ export async function sendSubscriptionInvoiceEmail(to: string, name: string, pla
   ));
 }
 
+export async function sendBotReviewEmail(
+  to: string,
+  name: string,
+  botName: string,
+  status: 'PUBLISHED' | 'REJECTED',
+  reason?: string
+): Promise<void> {
+  const approved = status === 'PUBLISHED';
+  await sendEmail(
+    to,
+    approved ? `✅ Bot approuvé : ${botName} — XHRIS HOST` : `❌ Bot rejeté : ${botName} — XHRIS HOST`,
+    baseTemplate(
+      approved ? 'Félicitations ! Votre bot est publié' : 'Votre bot a été rejeté',
+      para(`Bonjour ${name},`) +
+      (approved
+        ? para(`Bonne nouvelle ! Votre bot <strong style="color:#fff;">${botName}</strong> a été approuvé et est maintenant disponible sur le marketplace.`)
+        : para(`Votre bot <strong style="color:#fff;">${botName}</strong> n'a pas été accepté pour le moment.`)) +
+      (reason
+        ? `<div style="background:#1a1a2e;border-left:3px solid ${approved ? '#22c55e' : '#ef4444'};padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;">
+            <p style="color:${approved ? '#86efac' : '#fca5a5'};margin:0;font-size:14px;">${reason}</p>
+          </div>`
+        : '') +
+      (approved
+        ? btn(`${process.env.FRONTEND_URL}/marketplace`, 'Voir sur le marketplace')
+        : btn(`${process.env.FRONTEND_URL}/developer/publications`, 'Modifier et resoumettre'))
+    )
+  );
+}
+
 export async function sendServerExpirationAlertEmail(to: string, name: string, serverName: string, daysLeft: number): Promise<void> {
   const isUrgent = daysLeft <= 3;
   await sendEmail(to, `${isUrgent ? '🚨 ' : ''}Expiration serveur : ${serverName} — XHRIS HOST`, baseTemplate(

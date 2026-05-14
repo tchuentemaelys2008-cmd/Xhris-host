@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 const execAsync = promisify(exec);
+const DOCKER = process.env.DOCKER_BIN || '/usr/bin/docker';
 
 export async function deployBotContainer(
   botId: string,
@@ -14,7 +15,7 @@ export async function deployBotContainer(
   const workDir = `/tmp/xhris-bots/${botId}`;
   const appDir = `${workDir}/app`;
 
-  await execAsync(`docker rm -f ${containerName}`).catch(() => {});
+  await execAsync(`${DOCKER} rm -f ${containerName}`).catch(() => {});
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(appDir, { recursive: true });
 
@@ -85,23 +86,23 @@ function writeDefaultIndex(appDir: string, botId: string, platform: string) {
 }
 
 export async function stopBotContainer(botId: string): Promise<void> {
-  await execAsync(`docker stop xhris-bot-${botId}`).catch(() => {});
+  await execAsync(`${DOCKER} stop xhris-bot-${botId}`).catch(() => {});
 }
 
 export async function startBotContainer(botId: string): Promise<void> {
-  await execAsync(`docker start xhris-bot-${botId}`).catch(() => {});
+  await execAsync(`${DOCKER} start xhris-bot-${botId}`).catch(() => {});
 }
 
 export async function deleteBotContainer(botId: string): Promise<void> {
   const name = `xhris-bot-${botId}`;
-  await execAsync(`docker stop ${name}`).catch(() => {});
-  await execAsync(`docker rm ${name}`).catch(() => {});
+  await execAsync(`${DOCKER} stop ${name}`).catch(() => {});
+  await execAsync(`${DOCKER} rm ${name}`).catch(() => {});
   fs.rmSync(`/tmp/xhris-bots/${botId}`, { recursive: true, force: true });
 }
 
 export async function getBotContainerLogs(botId: string): Promise<string[]> {
   try {
-    const { stdout } = await execAsync(`docker logs xhris-bot-${botId} --tail 100 2>&1`);
+    const { stdout } = await execAsync(`${DOCKER} logs xhris-bot-${botId} --tail 100 2>&1`);
     return stdout.split('\n').filter(Boolean);
   } catch {
     return [];
@@ -111,7 +112,7 @@ export async function getBotContainerLogs(botId: string): Promise<string[]> {
 export async function getBotContainerStats(botId: string): Promise<{ cpu: number; ram: number }> {
   try {
     const { stdout } = await execAsync(
-      `docker stats xhris-bot-${botId} --no-stream --format "{{.CPUPerc}},{{.MemPerc}}"`,
+      `${DOCKER} stats xhris-bot-${botId} --no-stream --format "{{.CPUPerc}},{{.MemPerc}}"`,
     );
     const [cpu, ram] = stdout.trim().split(',').map(v => parseFloat(v.replace('%', '')));
     return { cpu: cpu || 0, ram: ram || 0 };

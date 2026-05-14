@@ -4,6 +4,7 @@ import { AuthRequest, adminMiddleware } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import { notify } from '../utils/notify';
+import { sendBotReviewEmail } from '../utils/email';
 
 const router = Router();
 router.use(adminMiddleware);
@@ -705,7 +706,7 @@ router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Respon
       where: { id: req.params.id },
       include: {
         developer: {
-          include: { user: { select: { id: true, name: true } } },
+          include: { user: { select: { id: true, name: true, email: true } } },
         },
       },
     });
@@ -713,7 +714,9 @@ router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Respon
 
     await prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: newStatus } });
 
-    await notify(bot.developer.user.id, {
+    const devUser = bot.developer.user;
+
+    await notify(devUser.id, {
       title: newStatus === 'PUBLISHED' ? '✅ Bot approuvé !' : '❌ Bot rejeté',
       message: newStatus === 'PUBLISHED'
         ? `Votre bot "${bot.name}" est maintenant publié sur le marketplace !`
@@ -721,6 +724,9 @@ router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Respon
       type: newStatus === 'PUBLISHED' ? 'SUCCESS' : 'WARNING',
       link: '/developer/publications',
     });
+
+    // Send email notification (fire and forget)
+    sendBotReviewEmail(devUser.email, devUser.name, bot.name, newStatus, reason).catch(() => {});
 
     sendSuccess(res, null, newStatus === 'PUBLISHED' ? 'Bot approuvé et publié' : 'Bot rejeté');
   } catch (err) { sendError(res, 'Erreur', 500); }
