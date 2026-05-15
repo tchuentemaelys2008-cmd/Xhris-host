@@ -26,7 +26,7 @@ export default function DeveloperPage() {
     description: '',
     platform: 'WHATSAPP',
     githubUrl: '',
-    demoUrl: '',
+    sessionUrl: '',
     tags: '',
     version: '1.0.0',
   });
@@ -52,13 +52,14 @@ export default function DeveloperPage() {
         fd.append('tags', form.tags);
         fd.append('version', form.version);
         if (form.githubUrl) fd.append('githubUrl', form.githubUrl);
-        if (form.demoUrl) fd.append('demoUrl', form.demoUrl);
+        if (form.sessionUrl) fd.append('sessionUrl', form.sessionUrl);
         fd.append('botZip', zipFile);
         return developerApi.submitBotWithFile(fd);
       }
       return developerApi.submitBot({
         ...form,
         tags: form.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+        sessionUrl: form.sessionUrl || null,
       });
     },
     onSuccess: () => {
@@ -238,9 +239,10 @@ export default function DeveloperPage() {
               value={form.githubUrl} onChange={e => setForm(f => ({ ...f, githubUrl: e.target.value }))} />
           </div>
           <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Lien démo (optionnel)</label>
-            <input className="input-field w-full" placeholder="https://..."
-              value={form.demoUrl} onChange={e => setForm(f => ({ ...f, demoUrl: e.target.value }))} />
+            <label className="text-xs text-gray-400 mb-1.5 block">Lien d&apos;obtention de session</label>
+            <input className="input-field w-full" placeholder="https://session.example.com"
+              value={form.sessionUrl} onChange={e => setForm(f => ({ ...f, sessionUrl: e.target.value }))} />
+            <p className="text-xs text-gray-600 mt-1">URL où les utilisateurs obtiendront leur Session ID</p>
           </div>
 
           {/* ZIP Upload */}

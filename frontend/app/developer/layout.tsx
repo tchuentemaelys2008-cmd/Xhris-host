@@ -71,9 +71,16 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
   const publications: any[] = Array.isArray(_rawPubs) ? _rawPubs : [];
   const hasApproved = publications.some((p: any) => p.status === 'PUBLISHED' || p.status === 'APPROVED');
 
-  // If on a specific sub-page and no approved bot, redirect to /developer
-  const isSubPage = pathname !== '/developer' && !pathname.endsWith('/developer');
-  if (isSubPage && pubData !== undefined && !hasApproved) {
+  // Pages accessible à tous les utilisateurs (pas besoin d'être développeur)
+  const openPages = ['/developer/deploy', '/developer/wallet'];
+  const isOpenPage = openPages.some(p => pathname.startsWith(p));
+
+  // Pages réservées aux développeurs (bot publié requis)
+  const devOnlyPages = ['/developer/hub', '/developer/publications', '/developer/statistics', '/developer/earnings', '/developer/leaderboard', '/developer/referral'];
+  const isDevOnlyPage = devOnlyPages.some(p => pathname.startsWith(p));
+
+  // Si non-développeur essaie d'accéder à une page dev : rediriger vers /developer
+  if (pubData !== undefined && !hasApproved && isDevOnlyPage) {
     router.replace('/developer');
     return null;
   }
@@ -161,9 +168,42 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
     </div>
   );
 
+  // Layout simplifié pour les non-développeurs (pages ouvertes ou /developer)
+  if (pubData !== undefined && !hasApproved && !isDevOnlyPage) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0F] flex flex-col">
+        <header className="h-14 bg-[#0D0D14]/90 backdrop-blur-md border-b border-white/5 sticky top-0 z-30 flex items-center justify-between px-6">
+          <Link href="/dashboard" className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-purple-600 rounded-lg flex items-center justify-center">
+              <Zap className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="font-bold text-white text-sm">XHRIS <span className="text-purple-400">HOST</span></span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard" className="text-xs text-gray-400 hover:text-white transition-colors">← Dashboard</Link>
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+              <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white">
+                {user?.name?.[0] || 'X'}
+              </div>
+              <div className="hidden sm:block">
+                <div className="text-xs font-medium text-white">{user?.name || 'Utilisateur'}</div>
+                <div className="text-[10px] text-gray-500">Compte standard</div>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 p-6 max-w-4xl mx-auto w-full">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+            {children}
+          </motion.div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0A0A0F] flex">
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar — uniquement pour les développeurs */}
       <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 w-56 z-50 flex-col">
         <Sidebar />
       </aside>
@@ -191,7 +231,6 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
           </button>
 
           <div className="flex items-center gap-3 ml-auto">
-            {/* Notifications */}
             <div className="relative">
               <button onClick={() => setNotifOpen(!notifOpen)}
                 className="relative w-9 h-9 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center hover:bg-white/10 transition-colors">
@@ -199,8 +238,6 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
                 <div className="absolute -top-1 -right-1 w-4 h-4 bg-purple-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold">12</div>
               </button>
             </div>
-
-            {/* User */}
             <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 cursor-pointer hover:bg-white/10 transition-colors">
               <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white">
                 {user?.name?.[0] || 'X'}
@@ -214,21 +251,18 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Content */}
         <main className="flex-1 p-6">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             {children}
           </motion.div>
         </main>
 
-        {/* Footer */}
         <footer className="border-t border-white/5 px-6 py-4">
           <div className="flex flex-wrap gap-4 text-xs text-gray-600 justify-center">
             <span>© 2024 XHRIS HOST. Tous droits réservés.</span>
-            <a href="/terms" className="hover:text-gray-400 transition-colors">Conditions d'utilisation</a>
+            <a href="/terms" className="hover:text-gray-400 transition-colors">Conditions d&apos;utilisation</a>
             <a href="/privacy" className="hover:text-gray-400 transition-colors">Politique de confidentialité</a>
             <a href="/contact" className="hover:text-gray-400 transition-colors">Contact</a>
-            <a href="/portfolio" className="hover:text-gray-400 transition-colors">Portfolio</a>
           </div>
         </footer>
       </div>

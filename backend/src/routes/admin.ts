@@ -694,6 +694,27 @@ router.get('/marketplace-bots/:id', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
+// PATCH /admin/marketplace-bots/:id — admin édite les infos du bot (sessionUrl, githubUrl, etc.)
+router.patch('/marketplace-bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const { sessionUrl, githubUrl, demoUrl, envTemplate, coinsPerDay } = req.body;
+    const bot = await prisma.marketplaceBot.findUnique({ where: { id: req.params.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+
+    const updated = await prisma.marketplaceBot.update({
+      where: { id: bot.id },
+      data: {
+        ...(sessionUrl  !== undefined && { sessionUrl:  sessionUrl  || null }),
+        ...(githubUrl   !== undefined && { githubUrl:   githubUrl   || null }),
+        ...(demoUrl     !== undefined && { demoUrl:     demoUrl     || null }),
+        ...(coinsPerDay !== undefined && { coinsPerDay: Number(coinsPerDay) }),
+        ...(envTemplate !== undefined && { envTemplate: typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate }),
+      },
+    });
+    sendSuccess(res, updated, 'Bot mis à jour');
+  } catch (err) { sendError(res, 'Erreur lors de la mise à jour', 500); }
+});
+
 router.post('/marketplace-bots/:id/review', async (req: AuthRequest, res: Response) => {
   try {
     const { status, reason } = req.body;

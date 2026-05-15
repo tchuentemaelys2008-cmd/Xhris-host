@@ -89,6 +89,9 @@ export const botsApi = {
   getLogs: (id: string, params?: any) =>
     apiClient.get(`/bots/${id}/logs`, { params }),
   delete: (id: string) => apiClient.delete(`/bots/${id}`),
+  getStats: (id: string) => apiClient.get(`/bots/${id}/stats`),
+  updateEnv: (id: string, vars: Record<string, string>) =>
+    apiClient.patch(`/bots/${id}/env`, { vars }),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +206,8 @@ export const adminApi = {
     apiClient.get(`/admin/marketplace-bots/${id}`),
   reviewMarketplaceBot: (id: string, status: 'PUBLISHED' | 'REJECTED', reason?: string) =>
     apiClient.post(`/admin/marketplace-bots/${id}/review`, { status, reason }),
+  updateMarketplaceBot: (id: string, data: { sessionUrl?: string; githubUrl?: string; demoUrl?: string; coinsPerDay?: number }) =>
+    apiClient.patch(`/admin/marketplace-bots/${id}`, data),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot, Search, CheckCircle, XCircle, Clock, Eye, ExternalLink,
-  Loader2, Download, Github, Tag, Filter, Mail,
+  Loader2, Download, Github, Tag, Filter, Mail, Edit, Save,
 } from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -32,6 +32,8 @@ export default function AdminMarketplacePage() {
   const [selected, setSelected]   = useState<any>(null);
   const [rejectReason, setReason] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const [editMode, setEditMode]   = useState(false);
+  const [editData, setEditData]   = useState<{ sessionUrl: string; githubUrl: string; demoUrl: string; coinsPerDay: string }>({ sessionUrl: '', githubUrl: '', demoUrl: '', coinsPerDay: '' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-marketplace-bots', search, statusFilter, page],
@@ -64,6 +66,32 @@ export default function AdminMarketplacePage() {
 
   const approve = (bot: any) => reviewMutation.mutate({ id: bot.id, status: 'PUBLISHED' });
   const reject  = (bot: any) => reviewMutation.mutate({ id: bot.id, status: 'REJECTED', reason: rejectReason || undefined });
+
+  const openEdit = (bot: any) => {
+    setEditData({
+      sessionUrl:  bot.sessionUrl  || '',
+      githubUrl:   bot.githubUrl   || '',
+      demoUrl:     bot.demoUrl     || '',
+      coinsPerDay: String(bot.coinsPerDay || 10),
+    });
+    setEditMode(true);
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: () => (adminApi as any).updateMarketplaceBot(selected.id, {
+      sessionUrl:  editData.sessionUrl  || null,
+      githubUrl:   editData.githubUrl   || null,
+      demoUrl:     editData.demoUrl     || null,
+      coinsPerDay: Number(editData.coinsPerDay) || 10,
+    }),
+    onSuccess: () => {
+      toast.success('Bot mis à jour');
+      qc.invalidateQueries({ queryKey: ['admin-marketplace-bots'] });
+      setSelected((prev: any) => ({ ...prev, ...editData, coinsPerDay: Number(editData.coinsPerDay) }));
+      setEditMode(false);
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
+  });
 
   return (
     <div className="space-y-6">
@@ -228,9 +256,17 @@ export default function AdminMarketplacePage() {
                   <h2 className="text-lg font-bold text-white">{selected.name}</h2>
                   <p className="text-sm text-gray-400 mt-0.5">v{selected.version} · {selected.platform}</p>
                 </div>
-                <button onClick={() => { setSelected(null); setShowReject(false); setReason(''); }} className="text-gray-500 hover:text-white">
-                  <XCircle className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => editMode ? setEditMode(false) : openEdit(selected)}
+                    className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 transition-colors"
+                  >
+                    <Edit className="w-3.5 h-3.5" /> {editMode ? 'Annuler' : 'Modifier'}
+                  </button>
+                  <button onClick={() => { setSelected(null); setShowReject(false); setReason(''); setEditMode(false); }} className="text-gray-500 hover:text-white">
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -259,26 +295,90 @@ export default function AdminMarketplacePage() {
                   </div>
                 )}
 
-                {/* Links */}
-                <div className="flex gap-3">
-                  {selected.githubUrl && (
-                    <a href={selected.githubUrl} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
-                      <Github className="w-4 h-4" /> GitHub
-                    </a>
-                  )}
-                  {selected.demoUrl && (
-                    <a href={selected.demoUrl} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
-                      <ExternalLink className="w-4 h-4" /> Démo
-                    </a>
-                  )}
-                  {selected.setupFile && (
-                    <span className="flex items-center gap-2 text-sm text-green-400 bg-green-500/10 rounded-lg px-3 py-2">
-                      <Download className="w-4 h-4" /> ZIP disponible
-                    </span>
-                  )}
-                </div>
+                {/* Mode édition admin */}
+                {editMode ? (
+                  <div className="bg-[#1A1A24] rounded-xl p-4 space-y-3 border border-purple-500/20">
+                    <p className="text-xs font-semibold text-purple-300 uppercase tracking-wider mb-3">Modifier les informations du bot</p>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">Lien d&apos;obtention de session</label>
+                      <input
+                        className="input-field w-full text-sm"
+                        placeholder="https://session.example.com"
+                        value={editData.sessionUrl}
+                        onChange={e => setEditData(d => ({ ...d, sessionUrl: e.target.value }))}
+                      />
+                      <p className="text-xs text-gray-600 mt-1">URL où les utilisateurs obtiendront leur Session ID</p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">GitHub URL</label>
+                      <input
+                        className="input-field w-full text-sm"
+                        placeholder="https://github.com/..."
+                        value={editData.githubUrl}
+                        onChange={e => setEditData(d => ({ ...d, githubUrl: e.target.value }))}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">Demo URL</label>
+                      <input
+                        className="input-field w-full text-sm"
+                        placeholder="https://..."
+                        value={editData.demoUrl}
+                        onChange={e => setEditData(d => ({ ...d, demoUrl: e.target.value }))}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">Coins / jour</label>
+                      <input
+                        type="number"
+                        className="input-field w-28 text-sm"
+                        min={1}
+                        value={editData.coinsPerDay}
+                        onChange={e => setEditData(d => ({ ...d, coinsPerDay: e.target.value }))}
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => updateMutation.mutate()}
+                      disabled={updateMutation.isPending}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium transition-colors disabled:opacity-50 mt-1"
+                    >
+                      {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Sauvegarder
+                    </button>
+                  </div>
+                ) : (
+                  /* Liens en lecture */
+                  <div className="flex flex-wrap gap-3">
+                    {selected.sessionUrl && (
+                      <a href={selected.sessionUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-2 text-sm text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-lg px-3 py-2 transition-colors">
+                        <ExternalLink className="w-4 h-4" /> Session
+                      </a>
+                    )}
+                    {selected.githubUrl && (
+                      <a href={selected.githubUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
+                        <Github className="w-4 h-4" /> GitHub
+                      </a>
+                    )}
+                    {selected.demoUrl && (
+                      <a href={selected.demoUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
+                        <ExternalLink className="w-4 h-4" /> Démo
+                      </a>
+                    )}
+                    {selected.setupFile && (
+                      <span className="flex items-center gap-2 text-sm text-green-400 bg-green-500/10 rounded-lg px-3 py-2">
+                        <Download className="w-4 h-4" /> ZIP disponible
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* Reject reason input */}
                 {showReject && selected.status === 'PENDING' && (

@@ -94,7 +94,7 @@ async function notifyAdmins(title: string, message: string, link = '/admin/bots'
 // POST /developer/bots — Submit bot (text)
 developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, platform, tags, version, githubUrl, demoUrl } = req.body;
+    const { name, description, platform, tags, version, githubUrl, demoUrl, envTemplate, sessionUrl } = req.body;
     if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
 
     let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
@@ -109,6 +109,8 @@ developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
         version: version || '1.0.0',
         githubUrl: githubUrl || null,
         demoUrl: demoUrl || null,
+        sessionUrl: sessionUrl || null,
+        envTemplate: envTemplate || {},
         status: 'PENDING',
         developerId: profile.id,
       },
@@ -122,7 +124,7 @@ developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
 // POST /developer/bots/upload — Submit bot with ZIP
 developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, platform, tags, version, githubUrl } = req.body;
+    const { name, description, platform, tags, version, githubUrl, envTemplate, sessionUrl } = req.body;
     if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
 
     let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
@@ -139,6 +141,8 @@ developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req: Aut
         version: version || '1.0.0',
         githubUrl: githubUrl || null,
         setupFile,
+        sessionUrl: sessionUrl || null,
+        envTemplate: envTemplate ? (typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate) : {},
         status: 'PENDING',
         developerId: profile.id,
       },

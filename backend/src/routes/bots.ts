@@ -50,7 +50,17 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 // POST /api/bots/deploy
 router.post('/deploy', async (req: AuthRequest, res: Response) => {
   try {
-    const { name, platform, sessionLink, envVars, marketplaceBotId } = req.body;
+    const { name, platform, sessionLink, envVars, marketplaceBotId, serverId: rawServerId } = req.body;
+
+    // Auto-select server if not provided
+    let serverId = rawServerId || null;
+    if (!serverId) {
+      const existingServer = await prisma.server.findFirst({
+        where: { userId: req.user!.id, status: { in: ['ONLINE', 'RUNNING'] as any } },
+        orderBy: { createdAt: 'desc' },
+      }).catch(() => null);
+      serverId = existingServer?.id || null;
+    }
     const marketplaceBot = marketplaceBotId
       ? await prisma.marketplaceBot.findFirst({ where: { id: marketplaceBotId, status: 'PUBLISHED' } }).catch(() => null)
       : null;

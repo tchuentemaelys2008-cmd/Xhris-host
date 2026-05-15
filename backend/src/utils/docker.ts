@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 const execAsync = promisify(exec);
-const DOCKER = process.env.DOCKER_BIN || '/usr/bin/docker';
+const DOCKER = process.env.DOCKER_BIN || 'docker';
 
 export async function createServerContainer(serverId: string, plan: string): Promise<{ containerId: string; port: number }> {
   const port = 10000 + Math.floor(Math.random() * 10000);

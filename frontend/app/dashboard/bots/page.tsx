@@ -6,7 +6,7 @@ import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
   Bot, Play, Square, RefreshCw, Trash2, Terminal, Settings,
-  Zap, Plus, Search, Loader2, CheckCircle, XCircle, Clock
+  Zap, Plus, Search, Loader2, X, Save,
 } from 'lucide-react';
 import { botsApi, extractApiList } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -19,6 +19,8 @@ export default function BotsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+  const [editVarsBot, setEditVarsBot] = useState<any>(null);
+  const [editVars, setEditVars] = useState<Record<string, string>>({});
 
   const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
     running: { label: t('bots.status.running', 'En ligne'), color: 'text-green-400', dot: 'bg-green-500' },
@@ -58,6 +60,29 @@ export default function BotsPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bots'] }); toast.success(t('bots.deleted', 'Bot supprimé.')); },
     onError: (e: any) => toast.error(e.message),
   });
+
+  const updateEnvMutation = useMutation({
+    mutationFn: ({ id, vars }: { id: string; vars: Record<string, string> }) =>
+      (botsApi as any).updateEnv(id, vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bots'] });
+      // Auto-restart pour appliquer les nouvelles variables
+      if (editVarsBot?.id) restartMutation.mutate(editVarsBot.id);
+      setEditVarsBot(null);
+      toast.success('Variables sauvegardées — bot en cours de redémarrage...');
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
+  });
+
+  const openEditVars = (bot: any) => {
+    const protectedKeys = ['XHRIS_API_KEY', 'XHRIS_API_URL', 'XHRIS_DEPLOY_TYPE'];
+    const vars: Record<string, string> = {};
+    Object.entries(bot.envVars || {}).forEach(([k, v]) => {
+      if (!protectedKeys.includes(k)) vars[k] = String(v);
+    });
+    setEditVars(vars);
+    setEditVarsBot(bot);
+  };
 
   const filtered = bots.filter(b =>
     !search || b.name?.toLowerCase().includes(search.toLowerCase())
@@ -203,6 +228,13 @@ export default function BotsPage() {
                       <Terminal className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      onClick={() => openEditVars(bot)}
+                      className="w-8 h-8 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center justify-center text-orange-400 hover:bg-orange-500/20 transition-colors"
+                      title="Modifier les variables"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       onClick={() => { if (confirm(t('bots.delete_confirm', 'Supprimer ce bot ?'))) deleteMutation.mutate(bot.id); }}
                       className="w-8 h-8 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-colors"
                       title="Supprimer"
@@ -248,6 +280,70 @@ export default function BotsPage() {
               </motion.div>
             );
           })}
+        </div>
+      )}
+
+      {/* Modal modifier les variables */}
+      {editVarsBot && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#111118] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col"
+            style={{ maxHeight: '90vh' }}>
+            <div className="flex items-center justify-between p-5 border-b border-white/5">
+              <div>
+                <h3 className="font-semibold text-white">Modifier les variables</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{editVarsBot.name} — les changements redémarrent le bot</p>
+              </div>
+              <button onClick={() => setEditVarsBot(null)} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {Object.keys(editVars).length === 0 ? (
+                <p className="text-sm text-gray-400">Aucune variable modifiable pour ce bot.</p>
+              ) : (
+                Object.entries(editVars).map(([key, value]) => (
+                  <div key={key}>
+                    <code className="text-xs font-mono text-purple-400 mb-1 block">{key}</code>
+                    <input
+                      className="input-field w-full text-sm font-mono"
+                      type={key.toLowerCase().includes('key') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('password') ? 'password' : 'text'}
+                      value={value === '***' ? '' : value}
+                      placeholder={value === '***' ? '(valeur masquée — laissez vide pour ne pas changer)' : ''}
+                      onChange={e => setEditVars(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))
+              )}
+
+              <div className="pt-2 border-t border-white/5">
+                <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                  <Settings className="w-3 h-3" />
+                  Les clés système (XHRIS_API_KEY, XHRIS_API_URL) sont protégées et non modifiables.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 p-5 border-t border-white/5">
+              <button onClick={() => setEditVarsBot(null)} className="btn-secondary flex-1">Annuler</button>
+              <button
+                onClick={() => {
+                  const filtered = Object.fromEntries(
+                    Object.entries(editVars).filter(([_, v]) => v !== '***' && v !== '')
+                  );
+                  updateEnvMutation.mutate({ id: editVarsBot.id, vars: filtered });
+                }}
+                disabled={updateEnvMutation.isPending}
+                className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {updateEnvMutation.isPending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Sauvegarde...</>
+                  : <><Save className="w-4 h-4" /> Sauvegarder &amp; Redémarrer</>
+                }
+              </button>
+            </div>
+          </motion.div>
         </div>
       )}
     </div>

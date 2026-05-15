@@ -30,6 +30,7 @@ export default function PublicationsPage() {
   const [form, setForm] = useState({
     name: '', description: '', platform: 'WHATSAPP',
     githubUrl: '', demoUrl: '', tags: '', version: '1.0.0',
+    sessionUrl: '', envTemplate: '{}',
   });
 
   const { data, isLoading } = useQuery({
@@ -65,19 +66,23 @@ export default function PublicationsPage() {
         fd.append('version', form.version);
         if (form.githubUrl) fd.append('githubUrl', form.githubUrl);
         if (form.demoUrl) fd.append('demoUrl', form.demoUrl);
+        if (form.sessionUrl) fd.append('sessionUrl', form.sessionUrl);
+        fd.append('envTemplate', form.envTemplate || '{}');
         fd.append('botZip', zipFile);
         return developerApi.submitBotWithFile(fd);
       }
       return developerApi.submitBot({
         ...form,
         tags: form.tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+        envTemplate: (() => { try { return JSON.parse(form.envTemplate || '{}'); } catch { return {}; } })(),
+        sessionUrl: form.sessionUrl || null,
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['dev-publications'] });
       setShowForm(false);
       setZipFile(null);
-      setForm({ name: '', description: '', platform: 'WHATSAPP', githubUrl: '', demoUrl: '', tags: '', version: '1.0.0' });
+      setForm({ name: '', description: '', platform: 'WHATSAPP', githubUrl: '', demoUrl: '', tags: '', version: '1.0.0', sessionUrl: '', envTemplate: '{}' });
       toast.success('Bot soumis pour validation !');
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur lors de la soumission'),
@@ -269,6 +274,21 @@ export default function PublicationsPage() {
                 <label className="text-xs text-gray-400 mb-1.5 block">Tags (séparés par virgule)</label>
                 <input className="input-field w-full" placeholder="IA, automatisation, WhatsApp..."
                   value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} />
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Lien d&apos;obtention de session (optionnel)</label>
+                <input className="input-field w-full" placeholder="https://session.example.com"
+                  value={form.sessionUrl} onChange={e => setForm(f => ({ ...f, sessionUrl: e.target.value }))} />
+                <p className="text-xs text-gray-600 mt-1">URL où les utilisateurs obtiennent leur Session ID</p>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400 mb-1.5 block">Template de variables (JSON)</label>
+                <textarea className="input-field w-full font-mono text-xs resize-none" rows={5}
+                  placeholder={'{\n  "BOT_NAME": {"label": "Nom du bot", "required": true, "type": "text", "default": "MonBot"},\n  "SESSION_ID": {"label": "Session ID", "required": true, "type": "text"}\n}'}
+                  value={form.envTemplate} onChange={e => setForm(f => ({ ...f, envTemplate: e.target.value }))} />
+                <p className="text-xs text-gray-600 mt-1">Décrivez les variables que l&apos;utilisateur devra configurer</p>
               </div>
 
               {/* ZIP upload */}
