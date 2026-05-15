@@ -69,6 +69,7 @@ export default function DeployBotPage() {
   const [deployError, setDeployError]         = useState<string | null>(null);
 
   const pollingRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const startTimeRef = useRef<number>(0);
   const logsDivRef   = useRef<HTMLDivElement>(null);
 
@@ -76,7 +77,10 @@ export default function DeployBotPage() {
     if (logsDivRef.current) logsDivRef.current.scrollTop = logsDivRef.current.scrollHeight;
   }, [deployLogs]);
 
-  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
+  useEffect(() => () => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    eventSourceRef.current?.close();
+  }, []);
 
   const { data, isLoading } = useQuery({
     queryKey: ['marketplace-bots'],
@@ -101,7 +105,12 @@ export default function DeployBotPage() {
     if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
   };
 
-  const handleDeploy = async () => {
+  const stopLogStream = () => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  };
+
+  const handleDeployLegacy = async () => {
     if (!selectedBot) return;
     setDeploying(true);
     setDeployLogs([]);
@@ -189,8 +198,124 @@ export default function DeployBotPage() {
     }
   };
 
+  const handleDeploy = async () => {
+    if (!selectedBot) return;
+    stopPolling();
+    stopLogStream();
+    setDeploying(true);
+    setDeployLogs([]);
+    setDeployError(null);
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+      const res = await fetch(`${apiBase}/bots/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: selectedBot.name,
+          platform: selectedBot.platform || 'WHATSAPP',
+          marketplaceBotId: selectedBot.id,
+          envVars: { ...envVars, ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}) },
+          sessionLink: envVars.SESSION_ID || envVars.session_id || '',
+        }),
+      });
+
+      const txt = await res.text();
+      let payload: any;
+      try { payload = JSON.parse(txt); } catch { payload = { success: false, message: 'Reponse invalide du serveur' }; }
+
+      if (!res.ok || !payload.success) {
+        const msg = payload.message || 'Le bot n\'a pas pu demarrer';
+        addLog(`Erreur: ${msg}`);
+        setDeployError(msg);
+        toast.error(msg);
+        setDeploying(false);
+        return;
+      }
+
+      const botId: string | undefined = payload.data?.id;
+      if (!botId) {
+        const msg = 'ID du bot manquant dans la reponse';
+        addLog(`Erreur: ${msg}`);
+        setDeployError(msg);
+        setDeploying(false);
+        return;
+      }
+
+      if (payload.data?.apiKey) setGeneratedApiKey(payload.data.apiKey);
+      addLog(`Deployement initie, ID: ${botId}`);
+      startTimeRef.current = Date.now();
+
+      const streamUrl = `${apiBase}/bots/${botId}/logs/stream?token=${encodeURIComponent(token || '')}`;
+      const source = new EventSource(streamUrl);
+      eventSourceRef.current = source;
+
+      source.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg?.line) addLog(msg.line);
+        } catch {
+          if (event.data) addLog(event.data);
+        }
+      };
+
+      source.onerror = () => {
+        addLog('Flux de logs interrompu, verification du statut en cours...');
+      };
+
+      pollingRef.current = setInterval(async () => {
+        try {
+          if (Date.now() - startTimeRef.current > 120_000) {
+            stopPolling();
+            stopLogStream();
+            setDeploying(false);
+            const msg = 'Timeout (2 min): le bot est toujours en demarrage. Voir dans le dashboard.';
+            addLog(msg);
+            setDeployError(msg);
+            return;
+          }
+
+          const statusRes = await fetch(`${apiBase}/bots/${botId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const statusPayload = await statusRes.json();
+          const bot = extractApiData(statusPayload) || {};
+          const status = String(bot.status || '').toUpperCase();
+
+          if (status === 'RUNNING' || status === 'ONLINE') {
+            stopPolling();
+            stopLogStream();
+            addLog('Bot connecte avec succes !');
+            setDeployedBot(bot);
+            setDeploying(false);
+            setCurrentStep(4);
+            toast.success('Bot connecte avec succes !');
+          } else if (status === 'ERROR') {
+            stopPolling();
+            stopLogStream();
+            const msg = bot.errorMessage || 'Le bot n\'a pas pu demarrer';
+            addLog(`Erreur: ${msg}`);
+            setDeployError(msg);
+            setDeploying(false);
+          }
+        } catch {
+          // Transient network errors should not stop an active deployment.
+        }
+      }, 2000);
+    } catch (err: any) {
+      stopLogStream();
+      addLog(`Erreur reseau: ${err.message || 'Connexion impossible'}`);
+      setDeployError(err.message || 'Connexion impossible');
+      toast.error('Erreur de connexion au serveur');
+      setDeploying(false);
+    }
+  };
+
   const resetAll = () => {
     stopPolling();
+    stopLogStream();
     setCurrentStep(1);
     setSelectedBot(null);
     setEnvVars({});
@@ -508,9 +633,15 @@ export default function DeployBotPage() {
                       </div>
                     )}
 
-                    {deploying && (
+                    {false && deploying && (
                       <p className="text-xs text-gray-500 text-center">
                         Installation des dépendances et démarrage du container en cours...
+                      </p>
+                    )}
+
+                    {deploying && (
+                      <p className="text-xs text-gray-500 text-center">
+                        En attente des logs reels et du signal de connexion du bot...
                       </p>
                     )}
 

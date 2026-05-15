@@ -1,7 +1,8 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import { appendBotLog, readBotLogLines, resetBotLogFile } from './bot-log-files';
 
 const execAsync = promisify(exec);
 const DOCKER = process.env.DOCKER_BIN || 'docker';
@@ -15,26 +16,33 @@ export async function deployBotContainer(
   const workDir = `/tmp/xhris-bots/${botId}`;
   const appDir = `${workDir}/app`;
 
+  resetBotLogFile(botId);
+  appendBotLog(botId, `Preparing Docker deployment for ${platform}`);
   await execAsync(`${DOCKER} rm -f ${containerName}`).catch(() => {});
   fs.rmSync(workDir, { recursive: true, force: true });
   fs.mkdirSync(appDir, { recursive: true });
 
   const gitUrl = envVars.GITHUB_URL || envVars.GIT_URL;
   if (gitUrl) {
+    appendBotLog(botId, 'Cloning bot source repository');
     await execAsync(`git clone --depth 1 "${gitUrl}" "${appDir}"`);
   } else if (envVars.SETUP_FILE_PATH) {
     const raw = envVars.SETUP_FILE_PATH;
     const setupPath = raw.startsWith('/') ? raw : path.join('/tmp/xhris-uploads', raw.replace(/^\/uploads\//, ''));
     if (fs.existsSync(setupPath)) {
       if (setupPath.endsWith('.zip')) {
+        appendBotLog(botId, 'Extracting uploaded bot archive');
         await execAsync(`unzip -o "${setupPath}" -d "${appDir}"`);
       } else {
+        appendBotLog(botId, 'Copying uploaded bot files');
         await execAsync(`cp -r "${setupPath}" "${appDir}/"`);
       }
     } else {
+      appendBotLog(botId, 'Setup file not found; creating placeholder bot');
       writeDefaultIndex(appDir, botId, platform);
     }
   } else {
+    appendBotLog(botId, 'No source provided; creating placeholder bot');
     writeDefaultIndex(appDir, botId, platform);
   }
 
@@ -44,7 +52,10 @@ export async function deployBotContainer(
   const connectorDest = `${sourceDir}/xhrishost-connector.js`;
   if (!fs.existsSync(connectorDest)) {
     const connectorSrc = path.join(__dirname, '../../public/xhrishost-connector.js');
-    if (fs.existsSync(connectorSrc)) fs.copyFileSync(connectorSrc, connectorDest);
+    if (fs.existsSync(connectorSrc)) {
+      fs.copyFileSync(connectorSrc, connectorDest);
+      appendBotLog(botId, 'XHRIS connector injected');
+    }
   }
 
   const internalKeys = new Set(['SETUP_FILE_PATH', 'GITHUB_URL', 'GIT_URL']);
@@ -67,6 +78,7 @@ export async function deployBotContainer(
   ].filter(Boolean).join('\n');
   fs.writeFileSync(path.join(sourceDir, 'start.sh'), startSh);
 
+  appendBotLog(botId, `Creating Docker container with entrypoint ${entry}`);
   const createCmd = [
     `${DOCKER} create`,
     `--name ${containerName}`,
@@ -81,8 +93,11 @@ export async function deployBotContainer(
 
   const { stdout } = await execAsync(createCmd);
   const containerId = stdout.trim();
+  appendBotLog(botId, `Container created: ${containerId.substring(0, 12)}`);
   await execAsync(`${DOCKER} cp "${sourceDir}" ${containerName}:/app`);
+  appendBotLog(botId, 'Bot files copied into container');
   await execAsync(`${DOCKER} start ${containerName}`);
+  appendBotLog(botId, 'Container started; waiting for bot readiness logs');
   return containerId;
 }
 
@@ -114,6 +129,7 @@ export async function stopBotContainer(botId: string): Promise<void> {
 
 export async function startBotContainer(botId: string): Promise<void> {
   await execAsync(`${DOCKER} start xhris-bot-${botId}`).catch(() => {});
+  appendBotLog(botId, 'Container start requested');
 }
 
 export async function deleteBotContainer(botId: string): Promise<void> {
@@ -126,10 +142,53 @@ export async function deleteBotContainer(botId: string): Promise<void> {
 export async function getBotContainerLogs(botId: string): Promise<string[]> {
   try {
     const { stdout } = await execAsync(`${DOCKER} logs xhris-bot-${botId} --tail 100 2>&1`);
-    return stdout.split('\n').filter(Boolean);
+    const dockerLogs = stdout.split('\n').filter(Boolean);
+    return dockerLogs.length > 0 ? dockerLogs : readBotLogLines(botId, 100);
   } catch {
-    return [];
+    return readBotLogLines(botId, 100);
   }
+}
+
+export function followBotContainerLogs(
+  botId: string,
+  onLine: (line: string, stream: 'stdout' | 'stderr') => void,
+  onExit?: (code: number | null) => void,
+): () => void {
+  const child = spawn(DOCKER, ['logs', '-f', `xhris-bot-${botId}`], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let closed = false;
+  const consume = (stream: 'stdout' | 'stderr') => {
+    let buffer = '';
+    child[stream].on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        appendBotLog(botId, stream === 'stderr' ? `[stderr] ${line}` : line);
+        onLine(line, stream);
+      }
+    });
+  };
+
+  consume('stdout');
+  consume('stderr');
+
+  child.on('error', (err) => {
+    appendBotLog(botId, `Docker log stream failed: ${err.message}`);
+  });
+
+  child.on('close', (code) => {
+    closed = true;
+    appendBotLog(botId, `Docker log stream closed with code ${code ?? 'unknown'}`);
+    onExit?.(code);
+  });
+
+  return () => {
+    if (!closed) child.kill();
+  };
 }
 
 export async function getBotContainerStats(botId: string): Promise<{ cpu: number; ram: number }> {

@@ -8,7 +8,8 @@ export interface AuthRequest extends Request {
 }
 
 export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+  const authHeader = req.headers.authorization || (queryToken ? `Bearer ${queryToken}` : undefined);
   const apiKey = req.headers['x-api-key'] as string;
 
   // API key auth — query DB for real validation

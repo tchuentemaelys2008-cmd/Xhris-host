@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "nodemon src/index.ts",
-    "build": "tsc && cp -r public dist/",
+    "build": "tsc && node -e \"require('fs').cpSync('public','dist/public',{recursive:true})\"",
     "start": "npx prisma db push --accept-data-loss && node dist/index.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
