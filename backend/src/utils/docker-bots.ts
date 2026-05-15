@@ -24,7 +24,7 @@ export async function deployBotContainer(
 
   const gitUrl = envVars.GITHUB_URL || envVars.GIT_URL;
   if (gitUrl) {
-    appendBotLog(botId, 'Cloning bot source repository');
+    appendBotLog(botId, `Cloning bot source repository: ${gitUrl}`);
     await execAsync(`git clone --depth 1 "${gitUrl}" "${appDir}"`);
   } else if (envVars.SETUP_FILE_PATH) {
     const raw = envVars.SETUP_FILE_PATH;
@@ -61,19 +61,26 @@ export async function deployBotContainer(
   const internalKeys = new Set(['SETUP_FILE_PATH', 'GITHUB_URL', 'GIT_URL']);
   const envFlags = Object.entries(envVars)
     .filter(([k]) => !internalKeys.has(k))
-    .map(([k, v]) => `-e "${k}=${v.replace(/"/g, '\\"')}"`)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `-e "${k}=${String(v).replace(/"/g, '\\"')}"`)
     .join(' ');
 
   const files = fs.readdirSync(sourceDir);
   const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
   const entry = candidates.find(e => files.includes(e)) || files.find(f => f.endsWith('.js')) || 'index.js';
   const hasPackageJson = files.includes('package.json');
+  const packageJson = hasPackageJson ? readPackageJson(path.join(sourceDir, 'package.json')) : null;
+  const hasStartScript = Boolean(packageJson?.scripts?.start);
+  const envKeys = Object.keys(envVars)
+    .filter(k => !['XHRIS_API_KEY', 'SESSION_ID', 'SESSION', 'SESSIONID', 'SESSION_STRING'].includes(k))
+    .sort();
+  appendBotLog(botId, `Runtime env keys injected: ${envKeys.join(', ') || 'none'}`);
 
   const startSh = [
     '#!/bin/sh',
     'set -e',
-    hasPackageJson ? 'npm install --production --silent 2>&1' : '',
-    `exec node ${entry}`,
+    hasPackageJson ? 'npm install --omit=dev 2>&1' : '',
+    hasStartScript ? 'exec npm start 2>&1' : `exec node ${entry} 2>&1`,
     '',
   ].filter(Boolean).join('\n');
   fs.writeFileSync(path.join(sourceDir, 'start.sh'), startSh);
@@ -111,6 +118,14 @@ function resolveAppDir(appDir: string): string {
     .filter(full => fs.existsSync(full) && fs.statSync(full).isDirectory());
 
   return directories.length === 1 ? directories[0] : appDir;
+}
+
+function readPackageJson(packagePath: string): any | null {
+  try {
+    return JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function writeDefaultIndex(appDir: string, botId: string, platform: string) {

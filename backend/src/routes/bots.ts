@@ -13,7 +13,30 @@ import { appendBotLog, ensureBotLogFile, readBotLogLines } from '../utils/bot-lo
 
 const router = Router();
 
-const READY_LOG_PATTERN = /(bot connect|connect[eé]|connected|ready|\[WA-CONNECT\]\s*open|whatsapp.*open|client.*ready|login successful)/i;
+const READY_LOG_PATTERN = /(\[WA-CONNECT\]\s*open|whatsapp\s+(connected|connect|open)|bot\s+(connected|connecte|connecté|en ligne)|client\s+(connected|connecte|connecté)|connection\s+open|login successful|connexion\s+whatsapp\s+reussie|connexion\s+whatsapp\s+réussie)/i;
+
+function addRuntimeEnvAliases(env: Record<string, string>): Record<string, string> {
+  const normalized = { ...env };
+  const session = normalized.SESSION_ID || normalized.SESSION || normalized.SESSIONID || normalized.SESSION_STRING;
+  if (session) {
+    normalized.SESSION_ID = session;
+    normalized.SESSION = normalized.SESSION || session;
+    normalized.SESSIONID = normalized.SESSIONID || session;
+    normalized.SESSION_STRING = normalized.SESSION_STRING || session;
+  }
+
+  const owner = normalized.OWNER_NUMBER || normalized.OWNER || normalized.OWNER_NUM || normalized.BOT_OWNER || normalized.SUDO;
+  if (owner) {
+    const cleanOwner = String(owner).replace(/^\+/, '');
+    normalized.OWNER_NUMBER = normalized.OWNER_NUMBER || cleanOwner;
+    normalized.OWNER = normalized.OWNER || cleanOwner;
+    normalized.OWNER_NUM = normalized.OWNER_NUM || cleanOwner;
+    normalized.BOT_OWNER = normalized.BOT_OWNER || cleanOwner;
+  }
+
+  if (normalized.PREFIX && !normalized.PREFIXES) normalized.PREFIXES = normalized.PREFIX;
+  return normalized;
+}
 
 function maskEnvVars(envVars: any): any {
   if (!envVars || typeof envVars !== 'object') return envVars;
@@ -92,17 +115,20 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const mergedEnvVars: Record<string, string> = {
+    const mergedEnvVars: Record<string, string> = addRuntimeEnvAliases({
       ...(envVars || {}),
       XHRIS_API_KEY: apiKeyValue,
       XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
       BOT_NAME: botName,
       XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
-    };
+    });
 
     if (marketplaceBotId && marketplaceBot) {
       if (marketplaceBot.githubUrl) mergedEnvVars.GITHUB_URL = marketplaceBot.githubUrl;
       if (marketplaceBot.setupFile) mergedEnvVars.SETUP_FILE_PATH = marketplaceBot.setupFile;
+      if (!marketplaceBot.githubUrl && !marketplaceBot.setupFile) {
+        return sendError(res, 'Ce bot marketplace n a ni depot GitHub ni fichier de setup publie', 400);
+      }
       await prisma.marketplaceBot.update({
         where: { id: marketplaceBotId },
         data: { downloads: { increment: 1 } },
@@ -147,9 +173,10 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
           }).catch(() => {});
         },
         async (code) => {
-          if (markedReady || code === 0) return;
+          if (code === 0) return;
           const latest = await prisma.bot.findUnique({ where: { id: bot.id }, select: { status: true } }).catch(() => null);
-          if (!latest || latest.status !== 'STARTING') return;
+          if (!latest || !['STARTING', 'RUNNING'].includes(latest.status)) return;
+          appendBotLog(bot.id, `Bot process stopped before a healthy WhatsApp session was confirmed (exit ${code ?? 'unknown'})`);
           await prisma.bot.update({
             where: { id: bot.id },
             data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },

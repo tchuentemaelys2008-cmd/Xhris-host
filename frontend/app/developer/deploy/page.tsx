@@ -70,6 +70,7 @@ export default function DeployBotPage() {
 
   const pollingRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const seenLogLinesRef = useRef<Set<string>>(new Set());
   const startTimeRef = useRef<number>(0);
   const logsDivRef   = useRef<HTMLDivElement>(null);
 
@@ -99,6 +100,16 @@ export default function DeployBotPage() {
     const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
       .map(n => String(n).padStart(2, '0')).join(':');
     setDeployLogs(prev => [...prev, `[${t}] ${msg}`]);
+  };
+
+  const addProcessLogs = (lines: string[]) => {
+    const nextLines = lines.filter(line => {
+      if (!line || seenLogLinesRef.current.has(line)) return false;
+      seenLogLinesRef.current.add(line);
+      return true;
+    });
+    if (nextLines.length === 0) return;
+    setDeployLogs(prev => [...prev, ...nextLines]);
   };
 
   const stopPolling = () => {
@@ -204,6 +215,7 @@ export default function DeployBotPage() {
     stopLogStream();
     setDeploying(true);
     setDeployLogs([]);
+    seenLogLinesRef.current.clear();
     setDeployError(null);
 
     try {
@@ -255,9 +267,9 @@ export default function DeployBotPage() {
       source.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg?.line) addLog(msg.line);
+          if (msg?.line) addProcessLogs([msg.line]);
         } catch {
-          if (event.data) addLog(event.data);
+          if (event.data) addProcessLogs([event.data]);
         }
       };
 
@@ -283,6 +295,11 @@ export default function DeployBotPage() {
           const statusPayload = await statusRes.json();
           const bot = extractApiData(statusPayload) || {};
           const status = String(bot.status || '').toUpperCase();
+
+          const logsRes = await botsApi.getLogs(botId);
+          const logsData = extractApiData(logsRes) || {};
+          const lines: string[] = Array.isArray(logsData.logs) ? logsData.logs : [];
+          addProcessLogs(lines);
 
           if (status === 'RUNNING' || status === 'ONLINE') {
             stopPolling();
@@ -631,12 +648,6 @@ export default function DeployBotPage() {
                       <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                         <p className="text-red-400 text-xs">{deployError}</p>
                       </div>
-                    )}
-
-                    {false && deploying && (
-                      <p className="text-xs text-gray-500 text-center">
-                        Installation des dépendances et démarrage du container en cours...
-                      </p>
                     )}
 
                     {deploying && (
