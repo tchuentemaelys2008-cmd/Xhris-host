@@ -5,7 +5,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Bot, Copy, Zap, ArrowLeft, Loader2, CheckCircle, MessageCircle, Plus } from 'lucide-react';
+import { Bot, Zap, ArrowLeft, Loader2, CheckCircle, MessageCircle, Plus, Key, ExternalLink } from 'lucide-react';
 import { extractApiList, marketplaceApi, botsApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -50,12 +50,47 @@ function AddBotRequestBanner({ user }: { user: any }) {
   );
 }
 
+const parseEnv = (v: any): Record<string, any> => {
+  if (!v) return {};
+  if (typeof v === 'string') {
+    try { return JSON.parse(v); } catch { return {}; }
+  }
+  return typeof v === 'object' ? v : {};
+};
+
+const DEFAULT_ENV_TEMPLATES: Record<string, Record<string, any>> = {
+  WHATSAPP: {
+    SESSION_ID:   { label: 'Session ID',          type: 'text',     required: true,  description: 'Session WhatsApp generee sur le site de pairing du bot' },
+    BOT_NAME:     { label: 'Nom du bot',          type: 'text',     required: true },
+    OWNER_NUMBER: { label: 'Numero proprietaire', type: 'text',     required: true,  description: 'Avec indicatif, sans le + (ex: 237xxxxxxxxx)' },
+    SUDO:         { label: 'Numeros SUDO',        type: 'text',     required: false, description: 'Numeros admin separes par des virgules' },
+    PREFIX:       { label: 'Prefixe',             type: 'text',     required: false, default: '.' },
+  },
+  TELEGRAM: {
+    BOT_TOKEN: { label: 'Bot Token',  type: 'password', required: true,  description: 'Token obtenu via @BotFather' },
+    BOT_NAME:  { label: 'Nom du bot', type: 'text',     required: true },
+    OWNER_ID:  { label: 'Owner ID',   type: 'text',     required: true,  description: 'Votre ID Telegram numerique' },
+  },
+  DISCORD: {
+    BOT_TOKEN: { label: 'Bot Token', type: 'password', required: true },
+    CLIENT_ID: { label: 'Client ID', type: 'text',     required: true },
+    GUILD_ID:  { label: 'Guild ID',  type: 'text',     required: false },
+  },
+};
+
+const resolveEnvTemplate = (bot: any) => {
+  const adminTemplate = parseEnv(bot?.envTemplate);
+  const platform = (bot?.platform || 'WHATSAPP').toUpperCase();
+  const defaults = DEFAULT_ENV_TEMPLATES[platform] || {};
+  return { ...defaults, ...adminTemplate };
+};
+
 export default function DeployBotPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
   const router = useRouter();
   const [selectedBot, setSelectedBot] = useState<any>(null);
-  const [sessionLink, setSessionLink] = useState('');
+  const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [step, setStep] = useState(1);
 
   const { data: marketData, isLoading } = useQuery({
@@ -69,7 +104,8 @@ export default function DeployBotPage() {
   const deployMutation = useMutation({
     mutationFn: () => botsApi.deploy({
       marketplaceBotId: selectedBot?.id,
-      sessionLink,
+      envVars,
+      sessionLink: envVars.SESSION_ID || envVars.session_id || '',
     }),
     onSuccess: () => {
       toast.success('Bot déployé avec succès !');
@@ -124,7 +160,10 @@ export default function DeployBotPage() {
               {bots.map((bot: any) => (
                 <button
                   key={bot.id}
-                  onClick={() => setSelectedBot(bot)}
+                  onClick={() => {
+                    setSelectedBot(bot);
+                    setEnvVars({});
+                  }}
                   className={`w-full text-left p-4 rounded-xl border transition-all ${selectedBot?.id === bot.id ? 'border-purple-500 bg-purple-500/10' : 'border-white/5 bg-[#111118] hover:border-purple-500/30'}`}
                 >
                   <div className="flex items-center gap-3">
@@ -158,24 +197,79 @@ export default function DeployBotPage() {
       {step === 2 && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
           <h2 className="text-lg font-semibold text-white">Configurer {selectedBot?.name}</h2>
-          <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Lien de session (optionnel)</label>
-            <div className="flex gap-2">
-              <input
-                className="input-field flex-1 text-xs"
-                placeholder="https://pairing-code.whatsapp.com/XXXX-XXXX"
-                value={sessionLink}
-                onChange={e => setSessionLink(e.target.value)}
-              />
-              <button
-                className="btn-secondary px-3"
-                onClick={() => navigator.clipboard.readText().then(t => setSessionLink(t))}
-              >
-                <Copy className="w-4 h-4" />
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Collez votre lien de session WhatsApp ici (si requis)</p>
-          </div>
+
+          {(() => {
+            const envTemplate = resolveEnvTemplate(selectedBot);
+            const entries = Object.entries(envTemplate);
+
+            if (entries.length === 0) {
+              return (
+                <div className="bg-gray-500/10 border border-gray-500/20 rounded-xl p-4 text-sm text-gray-400">
+                  Aucune variable d&apos;environnement requise pour ce bot. Vous pouvez passer directement au deploiement.
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {entries.map(([key, cfg]: [string, any]) => {
+                  const isSession = key.toUpperCase() === 'SESSION_ID';
+
+                  return (
+                    <div key={key}>
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <label className="text-sm font-medium text-white">{cfg.label || key}</label>
+                        {isSession && selectedBot?.sessionUrl && (
+                          <a
+                            href={selectedBot.sessionUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium"
+                          >
+                            <Key className="w-3 h-3" />
+                            Obtenir ma session
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                        {cfg.required ? (
+                          <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
+                        ) : (
+                          <span className="text-[10px] bg-gray-500/20 text-gray-400 px-1.5 py-0.5 rounded font-medium">Optionnel</span>
+                        )}
+                      </div>
+                      {cfg.description && <p className="text-xs text-gray-500 mb-1.5">{cfg.description}</p>}
+                      {cfg.type === 'select' ? (
+                        <select
+                          className="input-field w-full"
+                          value={envVars[key] ?? cfg.default ?? ''}
+                          onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                        >
+                          <option value="">Selectionner...</option>
+                          {(cfg.options || []).map((o: string) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : cfg.type === 'textarea' ? (
+                        <textarea
+                          rows={3}
+                          className="input-field w-full"
+                          placeholder={cfg.placeholder || cfg.default || (cfg.required ? 'Requis' : 'Optionnel')}
+                          value={envVars[key] ?? cfg.default ?? ''}
+                          onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                        />
+                      ) : (
+                        <input
+                          type={cfg.type === 'password' ? 'password' : cfg.type === 'number' ? 'number' : 'text'}
+                          className={`input-field w-full${isSession ? ' font-mono text-xs' : ''}`}
+                          placeholder={cfg.placeholder || cfg.default || (cfg.required ? 'Requis' : 'Optionnel')}
+                          value={envVars[key] ?? cfg.default ?? ''}
+                          onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <div className="bg-[#111118] border border-white/5 rounded-xl p-4">
             <h3 className="text-sm font-medium text-white mb-3">Résumé</h3>
@@ -193,7 +287,21 @@ export default function DeployBotPage() {
 
           <div className="flex gap-3">
             <button onClick={() => setStep(1)} className="btn-secondary flex-1">Retour</button>
-            <button onClick={() => setStep(3)} className="btn-primary flex-1">Continuer</button>
+            <button
+              onClick={() => {
+                const envTemplate = resolveEnvTemplate(selectedBot);
+                for (const [key, cfg] of Object.entries(envTemplate) as [string, any][]) {
+                  if (cfg.required && !envVars[key]?.trim() && !cfg.default) {
+                    toast.error(`${cfg.label || key} est requis`);
+                    return;
+                  }
+                }
+                setStep(3);
+              }}
+              className="btn-primary flex-1"
+            >
+              Continuer
+            </button>
           </div>
         </motion.div>
       )}
