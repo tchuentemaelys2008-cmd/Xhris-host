@@ -246,36 +246,9 @@ export default function DeployBotPage() {
           {currentStep === 2 && selectedBot && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
 
-              {/* Bouton obtenir la session — toujours en haut si sessionUrl existe */}
-              {selectedBot.sessionUrl && (
-                <div className="bg-[#111118] border border-purple-500/30 rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-9 h-9 rounded-xl bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                      <Key className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">Étape 1 — Obtenez votre Session ID</p>
-                      <p className="text-xs text-gray-400">Cliquez sur le bouton, connectez-vous, puis copiez votre Session ID</p>
-                    </div>
-                  </div>
-                  <a
-                    href={selectedBot.sessionUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Obtenir ma Session ID — {selectedBot.name}
-                  </a>
-                </div>
-              )}
-
               {/* Champs de configuration */}
               <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-6 h-6 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
-                    {selectedBot.sessionUrl ? '2' : '1'}
-                  </div>
+                <div className="flex items-center justify-between gap-2 mb-4">
                   <div>
                     <p className="text-sm font-semibold text-white">Configuration de {selectedBot.name}</p>
                     <p className="text-xs text-gray-400">Remplissez les paramètres ci-dessous</p>
@@ -283,17 +256,22 @@ export default function DeployBotPage() {
                 </div>
 
                 <div className="space-y-4">
-                  {/* SESSION_ID — toujours présent */}
+                  {/* SESSION_ID — avec bouton inline si sessionUrl disponible */}
                   <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <label className="text-sm font-medium text-white">Session ID</label>
-                      <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm font-medium text-white">Session ID</label>
+                        <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
+                      </div>
+                      {selectedBot.sessionUrl && (
+                        <a href={selectedBot.sessionUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
+                          <Key className="w-3 h-3" />
+                          Obtenir ma session
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-500 mb-1.5">
-                      {selectedBot.sessionUrl
-                        ? 'Collez ici le Session ID obtenu via le bouton ci-dessus'
-                        : 'Votre identifiant de session WhatsApp'}
-                    </p>
                     <input
                       className="input-field font-mono text-xs"
                       placeholder="Collez votre Session ID ici..."
