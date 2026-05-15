@@ -4,61 +4,77 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
-  Star, Download, CheckCircle, ArrowRight, Zap, ExternalLink, Bot,
-  MessageSquare, Music, Smartphone, Settings, Wrench, BookOpen, Loader2, Copy, Key,
+  Star, CheckCircle, ArrowRight, Zap, ExternalLink, Bot,
+  MessageSquare, Smartphone, Settings, Wrench, BookOpen,
+  Loader2, Copy, Key, Download, HelpCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { extractApiList, marketplaceApi } from '@/lib/api';
 
 const STEPS = [
-  { n: 1, label: 'Choisir un bot', sub: 'Sélectionnez le bot à déployer' },
-  { n: 2, label: 'Configuration', sub: 'Configurez les paramètres du bot' },
-  { n: 3, label: 'Déploiement', sub: 'Lancez et suivez le déploiement' },
-  { n: 4, label: 'Terminé', sub: 'Votre bot est en ligne' },
+  { n: 1, label: 'Choisir un bot',  sub: 'Sélectionnez le bot à déployer' },
+  { n: 2, label: 'Configuration',   sub: 'Configurez les paramètres du bot' },
+  { n: 3, label: 'Déploiement',     sub: 'Lancez et suivez le déploiement' },
+  { n: 4, label: 'Terminé',         sub: 'Votre bot est en ligne' },
 ];
-
-const PLATFORM_ICONS: Record<string, any> = {
-  whatsapp: Smartphone,
-  telegram: MessageSquare,
-  discord: MessageSquare,
-  tiktok: Music,
-};
 
 const DOC_LINKS = [
-  { Icon: BookOpen, l: 'Comment déployer un bot', sub: 'Guide étape par étape' },
-  { Icon: Settings, l: 'Variables d\'environnement', sub: 'Comprendre la configuration' },
-  { Icon: Wrench, l: 'Problèmes courants', sub: 'Solutions aux erreurs fréquentes' },
+  { icon: BookOpen, label: 'Comment déployer un bot',     sub: 'Guide étape par étape' },
+  { icon: Settings, label: 'Variables d\'environnement',  sub: 'Comprendre la configuration' },
+  { icon: Wrench,   label: 'Problèmes courants',          sub: 'Solutions aux erreurs fréquentes' },
 ];
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+const parseEnv = (v: any): Record<string, any> => {
+  if (!v) return {};
+  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return {}; } }
+  return typeof v === 'object' ? v : {};
+};
+
+const PLATFORM_ICON: Record<string, any> = {
+  WHATSAPP: Smartphone,
+  TELEGRAM: MessageSquare,
+  DISCORD:  MessageSquare,
+};
+
 export default function DeployBotPage() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [selectedBot, setSelectedBot] = useState<any>(null);
-  const [envVars, setEnvVars] = useState<Record<string, string>>({});
-  const [deploying, setDeploying] = useState(false);
-  const [deployLogs, setDeployLogs] = useState<string[]>([]);
+  const [currentStep, setCurrentStep]         = useState(1);
+  const [selectedBot, setSelectedBot]         = useState<any>(null);
+  const [envVars, setEnvVars]                 = useState<Record<string, string>>({});
+  const [deploying, setDeploying]             = useState(false);
+  const [deployLogs, setDeployLogs]           = useState<string[]>([]);
+  const [deployedBot, setDeployedBot]         = useState<any>(null);
   const [generatedApiKey, setGeneratedApiKey] = useState<string | null>(null);
-  const [deployedBot, setDeployedBot] = useState<any>(null);
+  const [searchQuery, setSearchQuery]         = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['marketplace-bots'],
     queryFn: () => marketplaceApi.getAll({ sort: 'popular' }),
   });
 
-  const bots = extractApiList(data, 'bots');
+  const allBots = extractApiList(data, 'bots');
+  const bots = allBots.filter(b =>
+    !searchQuery ||
+    b.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    b.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const addLog = (msg: string) => {
+    const now = new Date();
+    const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map(n => String(n).padStart(2, '0')).join(':');
+    setDeployLogs(prev => [...prev, `[${t}] ${msg}`]);
+  };
 
   const handleDeploy = async () => {
     if (!selectedBot) return;
     setDeploying(true);
     setDeployLogs([]);
-
-    const addLog = (msg: string) =>
-      setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
-
-    addLog('Préparation du déploiement...');
     try {
+      addLog('Préparation du déploiement...');
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
-      addLog('Connexion au serveur...');
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || '/api'}/bots/deploy`,
         {
@@ -67,51 +83,55 @@ export default function DeployBotPage() {
           body: JSON.stringify({
             name: selectedBot.name,
             platform: selectedBot.platform || 'WHATSAPP',
-            envVars: {
-              ...envVars,
-              ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}),
-            },
             marketplaceBotId: selectedBot.id,
-            sessionLink: envVars.SESSION_ID || '',
+            envVars: { ...envVars, ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}) },
+            sessionLink: envVars.SESSION_ID || envVars.session_id || '',
           }),
         }
       );
-      addLog('Traitement par le serveur...');
-      const data = await res.json();
+      const txt = await res.text();
+      let payload: any;
+      try { payload = JSON.parse(txt); } catch { payload = { success: false, message: 'Réponse invalide du serveur' }; }
 
-      if (data.success) {
+      if (payload.success) {
         addLog('✅ Bot créé avec succès !');
-        addLog('Installation des dépendances...');
-        await new Promise(r => setTimeout(r, 1500));
-        addLog('Injection du connector XHRIS HOST...');
-        await new Promise(r => setTimeout(r, 1000));
-        addLog('Démarrage du conteneur...');
-        await new Promise(r => setTimeout(r, 1000));
+        await sleep(1500); addLog('Installation des dépendances...');
+        await sleep(1000); addLog('Injection du connector XHRIS HOST...');
+        await sleep(1000); addLog('Démarrage du conteneur...');
         addLog('✅ Bot en ligne !');
-
-        setDeployedBot(data.data);
-        if (data.data?.apiKey) setGeneratedApiKey(data.data.apiKey);
-
-        await new Promise(r => setTimeout(r, 500));
+        setDeployedBot(payload.data);
+        if (payload.data?.apiKey) setGeneratedApiKey(payload.data.apiKey);
+        await sleep(500);
         setCurrentStep(4);
         toast.success('Bot déployé avec succès !');
       } else {
-        const errMsg = data.message || 'Erreur inconnue';
-        addLog(`❌ Erreur: ${errMsg}`);
-        console.error('[XHRIS DEPLOY] Échec du déploiement:', errMsg, data);
-        toast.error(errMsg);
+        const msg = payload.message || 'Erreur inconnue';
+        addLog(`❌ Erreur: ${msg}`);
+        console.error('[XHRIS DEPLOY]', msg, payload);
+        toast.error(msg);
       }
     } catch (err: any) {
-      const errMsg = err.message || 'Erreur réseau';
-      addLog(`❌ Erreur de connexion: ${errMsg}`);
-      console.error('[XHRIS DEPLOY] Erreur de connexion:', err);
+      addLog(`❌ Erreur réseau: ${err.message || 'Connexion impossible'}`);
+      console.error('[XHRIS DEPLOY] network error', err);
       toast.error('Erreur de connexion au serveur');
+    } finally {
+      setDeploying(false);
     }
-    setDeploying(false);
+  };
+
+  const resetAll = () => {
+    setCurrentStep(1);
+    setSelectedBot(null);
+    setEnvVars({});
+    setDeployLogs([]);
+    setDeployedBot(null);
+    setGeneratedApiKey(null);
+    setSearchQuery('');
   };
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-white">Déployer un Bot</h1>
@@ -122,12 +142,16 @@ export default function DeployBotPage() {
         </Link>
       </div>
 
-      {/* Steps */}
+      {/* Stepper */}
       <div className="flex items-center gap-0 bg-[#111118] border border-white/5 rounded-xl p-4 overflow-x-auto">
         {STEPS.map((s, i) => (
           <div key={s.n} className="flex items-center flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-shrink-0">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${currentStep === s.n ? 'bg-purple-600 border-purple-600 text-white' : currentStep > s.n ? 'bg-green-600 border-green-600 text-white' : 'bg-transparent border-white/20 text-gray-500'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                currentStep === s.n ? 'bg-purple-600 border-purple-600 text-white' :
+                currentStep > s.n  ? 'bg-green-600 border-green-600 text-white' :
+                'bg-transparent border-white/20 text-gray-500'
+              }`}>
                 {currentStep > s.n ? <CheckCircle className="w-4 h-4" /> : s.n}
               </div>
               <div className="hidden md:block">
@@ -144,264 +168,195 @@ export default function DeployBotPage() {
         ))}
       </div>
 
+      {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main content */}
-        <div className="lg:col-span-2">
-          {/* Step 1: Choose bot */}
+        {/* Content */}
+        <div className="lg:col-span-2 space-y-4">
+
+          {/* ── STEP 1 ── */}
           {currentStep === 1 && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-              <div className="bg-[#111118] border border-white/5 rounded-xl p-4 sm:p-5">
+              <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
                 <h2 className="font-semibold text-white mb-1">1. Choisissez le bot à déployer</h2>
                 <p className="text-xs text-gray-400 mb-4">Parcourez les bots disponibles et sélectionnez celui que vous souhaitez déployer.</p>
-                <div className="flex gap-3 mb-4">
-                  <input className="input-field flex-1" placeholder="Rechercher un bot..." />
-                  <select className="bg-[#1A1A24] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none hidden sm:block">
-                    <option>Catégorie</option>
-                  </select>
-                </div>
+
+                <input
+                  className="input-field w-full mb-4"
+                  placeholder="Rechercher un bot..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+
                 {isLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-purple-400 animate-spin" /></div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="h-40 bg-white/5 rounded-xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : bots.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">
+                    <Bot className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Aucun bot trouvé</p>
+                  </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {bots.map((bot: any) => {
-                      const PIcon = PLATFORM_ICONS[bot.platform?.toLowerCase()] || Bot;
+                      const Icon = PLATFORM_ICON[bot.platform?.toUpperCase()] || Bot;
+                      const isSelected = selectedBot?.id === bot.id;
                       return (
-                        <div key={bot.id || bot.name}
+                        <div
+                          key={bot.id || bot.name}
                           onClick={() => setSelectedBot(bot)}
-                          className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${selectedBot?.id === bot.id ? 'border-purple-500 bg-purple-500/10' : 'border-white/5 hover:border-white/20 bg-[#1A1A24]'}`}>
-                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                            <PIcon className="w-5 h-5 text-purple-400" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                              <span className="text-sm font-medium text-white">{bot.name}</span>
-                              <span className={`badge text-xs ${bot.status === 'Public' || bot.status === 'PUBLISHED' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>{bot.status}</span>
+                          className={`rounded-xl border p-4 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-purple-500 bg-purple-500/10 ring-2 ring-purple-500'
+                              : 'border-white/5 bg-[#1A1A24] hover:border-white/20'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                              <Icon className="w-5 h-5 text-purple-400" />
                             </div>
-                            <div className="text-xs text-gray-400">{bot.description || bot.desc}</div>
-                            <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-500">
-                              {bot.developer && <span>Par {bot.developer}</span>}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-bold text-white">{bot.name}</span>
+                                {bot.platform && (
+                                  <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded">{bot.platform}</span>
+                                )}
+                              </div>
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                {(bot.tags || []).slice(0, 3).map((t: string) => (
+                                  <span key={t} className="text-[10px] bg-white/5 text-gray-400 px-1.5 py-0.5 rounded">{t}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-400 line-clamp-2 mb-3">{bot.description}</p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-xs text-gray-500">
                               {(bot.rating ?? 0) > 0 && (
                                 <span className="flex items-center gap-1">
-                                  <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />{bot.rating}
+                                  <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
+                                  {bot.rating}
                                 </span>
                               )}
-                              <span className="text-green-400 font-medium flex items-center gap-1">
-                                +{bot.coinsPerDeploy || 2} Coins/déploiement
-                              </span>
+                              <span className="text-amber-400 font-medium">{bot.coinsPerDay || 10} Coins/jour</span>
+                            </div>
+                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                              isSelected ? 'border-purple-500 bg-purple-500' : 'border-white/20'
+                            }`}>
+                              {isSelected && <CheckCircle className="w-3.5 h-3.5 text-white" />}
                             </div>
                           </div>
-                          <button className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${selectedBot?.id === bot.id ? 'bg-purple-600 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}>
-                            {selectedBot?.id === bot.id ? <CheckCircle className="w-3.5 h-3.5" /> : 'Choisir'}
-                          </button>
                         </div>
                       );
                     })}
                   </div>
                 )}
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="text-xs text-gray-400">Pas ce que vous cherchez ?</p>
-                  <Link href="/marketplace" className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1">
-                    Voir le Marketplace <ExternalLink className="w-3 h-3" />
-                  </Link>
-                </div>
               </div>
-
-              {selectedBot && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-[#111118] border border-white/5 rounded-xl p-5">
-                  <h3 className="font-semibold text-white mb-4">Aperçu du bot sélectionné</h3>
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                      <Bot className="w-6 h-6 text-purple-400" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="font-semibold text-white">{selectedBot.name}</span>
-                        <span className="badge bg-green-500/20 text-green-400 text-xs">{selectedBot.status}</span>
-                      </div>
-                      {selectedBot.developer && <div className="text-xs text-gray-400 mb-2">Par {selectedBot.developer}</div>}
-                      <div className="flex gap-2 flex-wrap mb-3">
-                        {(selectedBot.tags || []).map((t: string) => <span key={t} className="badge bg-white/5 text-gray-400 text-xs">{t}</span>)}
-                      </div>
-                      <p className="text-sm text-gray-300">{selectedBot.description || selectedBot.desc}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-xs text-gray-400 mb-1">Récompense</div>
-                      <div className="text-xl font-bold text-green-400">+{selectedBot.coinsPerDeploy || 2}</div>
-                      <div className="text-xs text-gray-500">Coins/déploiement</div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
               <div className="flex justify-end">
-                <button onClick={() => selectedBot && setCurrentStep(2)} disabled={!selectedBot}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                <button
+                  onClick={() => { if (selectedBot) setCurrentStep(2); }}
+                  disabled={!selectedBot}
+                  className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Continuer <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </motion.div>
           )}
 
-          {/* Step 2: Configuration standardisée */}
+          {/* ── STEP 2 ── */}
           {currentStep === 2 && selectedBot && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-
-              {/* Champs de configuration */}
               <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Configuration de {selectedBot.name}</p>
-                    <p className="text-xs text-gray-400">Remplissez les paramètres ci-dessous</p>
-                  </div>
-                </div>
+                <h2 className="font-semibold text-white mb-1">2. Configuration de {selectedBot.name}</h2>
+                <p className="text-xs text-gray-400 mb-4">Remplissez les paramètres requis pour faire fonctionner le bot.</p>
 
-                <div className="space-y-4">
-                  {/* SESSION_ID — avec bouton inline si sessionUrl disponible */}
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm font-medium text-white">Session ID</label>
-                        <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
-                      </div>
-                      {selectedBot.sessionUrl && (
-                        <a href={selectedBot.sessionUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
-                          <Key className="w-3 h-3" />
-                          Obtenir ma session
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                    <input
-                      className="input-field font-mono text-xs"
-                      placeholder="Collez votre Session ID ici..."
-                      value={envVars.SESSION_ID || ''}
-                      onChange={e => setEnvVars({ ...envVars, SESSION_ID: e.target.value })}
-                    />
-                  </div>
+                {(() => {
+                  const envTemplate = parseEnv(selectedBot.envTemplate);
+                  const entries = Object.entries(envTemplate);
 
-                  {/* BOT_NAME */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <label className="text-sm font-medium text-white">Nom du bot</label>
-                      <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
-                    </div>
-                    <input
-                      className="input-field"
-                      placeholder={selectedBot.name || 'Mon Bot'}
-                      defaultValue={selectedBot.name || ''}
-                      onChange={e => setEnvVars({ ...envVars, BOT_NAME: e.target.value })}
-                    />
-                  </div>
-
-                  {/* OWNER_NUMBER */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <label className="text-sm font-medium text-white">Numéro propriétaire</label>
-                      <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
-                    </div>
-                    <p className="text-xs text-gray-500 mb-1.5">Votre numéro WhatsApp avec indicatif (sans +)</p>
-                    <input
-                      className="input-field font-mono"
-                      placeholder="237xxxxxxxxx"
-                      value={envVars.OWNER_NUMBER || ''}
-                      onChange={e => setEnvVars({ ...envVars, OWNER_NUMBER: e.target.value })}
-                    />
-                  </div>
-
-                  {/* SUDO */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <label className="text-sm font-medium text-white">Numéros SUDO</label>
-                      <span className="text-[10px] bg-gray-500/20 text-gray-400 px-1.5 py-0.5 rounded font-medium">Optionnel</span>
-                    </div>
-                    <p className="text-xs text-gray-500 mb-1.5">Numéros avec accès admin au bot, séparés par des virgules</p>
-                    <input
-                      className="input-field font-mono"
-                      placeholder="237xxxxxxxxx,237yyyyyyyyy"
-                      value={envVars.SUDO || ''}
-                      onChange={e => setEnvVars({ ...envVars, SUDO: e.target.value })}
-                    />
-                  </div>
-
-                  {/* PREFIX */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <label className="text-sm font-medium text-white">Préfixe des commandes</label>
-                      <span className="text-[10px] bg-gray-500/20 text-gray-400 px-1.5 py-0.5 rounded font-medium">Optionnel</span>
-                    </div>
-                    <input
-                      className="input-field w-24"
-                      placeholder="."
-                      defaultValue="."
-                      maxLength={3}
-                      onChange={e => setEnvVars({ ...envVars, PREFIX: e.target.value || '.' })}
-                    />
-                  </div>
-
-                  {/* Champs supplémentaires depuis envTemplate (hors champs standard) */}
-                  {(() => {
-                    const standard = ['SESSION_ID','BOT_NAME','OWNER_NUMBER','SUDO','PREFIX'];
-                    const tpl = typeof selectedBot.envTemplate === 'string'
-                      ? (() => { try { return JSON.parse(selectedBot.envTemplate); } catch { return {}; } })()
-                      : (selectedBot.envTemplate || {});
-                    const extra = Object.entries(tpl).filter(([k]) => !standard.includes(k));
-                    if (extra.length === 0) return (
-                      <p className="text-xs text-gray-600 pt-2 border-t border-white/5">
-                        Les variables ci-dessus sont suffisantes pour ce bot.
-                      </p>
-                    );
+                  if (entries.length === 0) {
                     return (
-                      <>
-                        <div className="border-t border-white/5 pt-4">
-                          <p className="text-xs text-gray-500 mb-3 font-medium uppercase tracking-wider">Paramètres spécifiques à {selectedBot.name}</p>
-                          <div className="space-y-4">
-                            {extra.map(([key, config]: [string, any]) => (
-                              <div key={key}>
-                                <div className="flex items-center gap-2 mb-1.5">
-                                  <label className="text-sm font-medium text-white">{config.label || key}</label>
-                                  {config.required && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>}
-                                </div>
-                                {config.description && <p className="text-xs text-gray-500 mb-1.5">{config.description}</p>}
-                                {config.type === 'select' ? (
-                                  <select className="input-field"
-                                    value={envVars[key] || config.default || ''}
-                                    onChange={e => setEnvVars({ ...envVars, [key]: e.target.value })}>
-                                    <option value="">Sélectionner...</option>
-                                    {(config.options || []).map((o: string) => <option key={o} value={o}>{o}</option>)}
-                                  </select>
-                                ) : (
-                                  <input
-                                    type={config.type === 'password' ? 'password' : 'text'}
-                                    className="input-field"
-                                    placeholder={config.placeholder || config.default || (config.required ? 'Requis' : 'Optionnel')}
-                                    defaultValue={config.default || ''}
-                                    onChange={e => setEnvVars({ ...envVars, [key]: e.target.value })}
-                                  />
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </>
+                      <div className="bg-gray-500/10 border border-gray-500/20 rounded-xl p-4 text-sm text-gray-400">
+                        Aucune variable d&apos;environnement requise pour ce bot. Vous pouvez passer directement au déploiement.
+                      </div>
                     );
-                  })()}
-                </div>
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {entries.map(([key, cfg]: [string, any]) => {
+                        const isSession = key.toUpperCase() === 'SESSION_ID';
+                        return (
+                          <div key={key}>
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                              <label className="text-sm font-medium text-white">{cfg.label || key}</label>
+                              {isSession && selectedBot.sessionUrl && (
+                                <a
+                                  href={selectedBot.sessionUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium"
+                                >
+                                  <Key className="w-3 h-3" />
+                                  Obtenir ma session
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                              {cfg.required ? (
+                                <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
+                              ) : (
+                                <span className="text-[10px] bg-gray-500/20 text-gray-400 px-1.5 py-0.5 rounded font-medium">Optionnel</span>
+                              )}
+                            </div>
+                            {cfg.description && <p className="text-xs text-gray-500 mb-1.5">{cfg.description}</p>}
+                            {cfg.type === 'select' ? (
+                              <select
+                                className="input-field"
+                                value={envVars[key] ?? cfg.default ?? ''}
+                                onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                              >
+                                <option value="">Sélectionner...</option>
+                                {(cfg.options || []).map((o: string) => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            ) : cfg.type === 'textarea' ? (
+                              <textarea
+                                rows={3}
+                                className="input-field"
+                                placeholder={cfg.placeholder || cfg.default || (cfg.required ? 'Requis' : 'Optionnel')}
+                                value={envVars[key] ?? cfg.default ?? ''}
+                                onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                              />
+                            ) : (
+                              <input
+                                type={cfg.type === 'password' ? 'password' : cfg.type === 'number' ? 'number' : 'text'}
+                                className={`input-field${isSession ? ' font-mono text-xs' : ''}`}
+                                placeholder={cfg.placeholder || cfg.default || (cfg.required ? 'Requis' : 'Optionnel')}
+                                value={envVars[key] ?? cfg.default ?? ''}
+                                onChange={e => setEnvVars(v => ({ ...v, [key]: e.target.value }))}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="flex justify-between">
                 <button onClick={() => setCurrentStep(1)} className="btn-secondary">← Retour</button>
                 <button
                   onClick={() => {
-                    if (!envVars.SESSION_ID?.trim()) { toast.error('Le Session ID est requis'); return; }
-                    if (!envVars.BOT_NAME?.trim() && !selectedBot.name) { toast.error('Le nom du bot est requis'); return; }
-                    if (!envVars.OWNER_NUMBER?.trim()) { toast.error('Le numéro propriétaire est requis'); return; }
-                    // Appliquer les defaults si champ non touché
-                    setEnvVars(prev => ({
-                      ...prev,
-                      BOT_NAME: prev.BOT_NAME || selectedBot.name || 'MonBot',
-                      PREFIX: prev.PREFIX || '.',
-                    }));
+                    const envTemplate = parseEnv(selectedBot.envTemplate);
+                    for (const [key, cfg] of Object.entries(envTemplate) as [string, any][]) {
+                      if (cfg.required && !envVars[key]?.trim() && !cfg.default) {
+                        toast.error(`${cfg.label || key} est requis`);
+                        return;
+                      }
+                    }
                     setCurrentStep(3);
                   }}
                   className="btn-primary flex items-center gap-2"
@@ -412,29 +367,31 @@ export default function DeployBotPage() {
             </motion.div>
           )}
 
-          {/* Step 3: Deploy + logs */}
-          {currentStep === 3 && (
+          {/* ── STEP 3 ── */}
+          {currentStep === 3 && selectedBot && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
               <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
                 <h2 className="font-semibold text-white mb-4">3. Déploiement</h2>
 
                 {!deploying && !deployedBot && (
                   <>
-                    <div className="space-y-3 mb-6">
+                    <div className="space-y-0 mb-6 rounded-xl overflow-hidden border border-white/5">
                       {[
-                        { l: 'Bot', v: selectedBot?.name },
-                        { l: 'Plateforme', v: selectedBot?.platform },
-                        { l: 'Variables configurées', v: `${Object.keys(envVars).filter(k => envVars[k]).length} variable(s)` },
-                        { l: 'Coût', v: `${selectedBot?.coinsPerDay || 10} Coins / jour` },
-                      ].map(i => (
-                        <div key={i.l} className="flex justify-between py-2 border-b border-white/5 last:border-0 text-sm">
-                          <span className="text-gray-400">{i.l}</span>
-                          <span className="text-white font-medium">{i.v}</span>
+                        { l: 'Bot',                    v: selectedBot.name },
+                        { l: 'Plateforme',             v: selectedBot.platform },
+                        { l: 'Variables configurées',  v: `${Object.keys(envVars).filter(k => envVars[k]).length} variable(s)` },
+                        { l: 'Coût',                   v: `${selectedBot.coinsPerDay || 10} Coins / jour` },
+                      ].map((row, i, arr) => (
+                        <div key={row.l} className={`flex justify-between px-4 py-3 text-sm ${i < arr.length - 1 ? 'border-b border-white/5' : ''} bg-[#1A1A24]`}>
+                          <span className="text-gray-400">{row.l}</span>
+                          <span className="text-white font-medium">{row.v}</span>
                         </div>
                       ))}
                     </div>
-                    <button onClick={handleDeploy}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
+                    <button
+                      onClick={handleDeploy}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors"
+                    >
                       <Zap className="w-4 h-4" /> Lancer le déploiement
                     </button>
                   </>
@@ -442,9 +399,9 @@ export default function DeployBotPage() {
 
                 {deploying && (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center gap-3 mb-2">
                       <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
-                      <span className="text-white font-medium">Déploiement en cours...</span>
+                      <span className="text-white font-medium text-sm">Déploiement en cours...</span>
                     </div>
                     <div className="bg-black/40 rounded-lg p-4 font-mono text-xs text-gray-400 space-y-1 max-h-48 overflow-y-auto">
                       {deployLogs.map((log, i) => (
@@ -458,6 +415,7 @@ export default function DeployBotPage() {
                   </div>
                 )}
               </div>
+
               {!deploying && !deployedBot && (
                 <div className="flex justify-between">
                   <button onClick={() => setCurrentStep(2)} className="btn-secondary">← Retour</button>
@@ -466,18 +424,17 @@ export default function DeployBotPage() {
             </motion.div>
           )}
 
-          {/* Step 4: Success */}
+          {/* ── STEP 4 ── */}
           {currentStep === 4 && (
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4">
+            <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4">
               <div className="text-center py-6">
                 <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle className="w-10 h-10 text-green-400" />
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">Votre bot est en ligne !</h2>
-                <p className="text-gray-400 mb-1">{selectedBot?.name} a été déployé avec succès.</p>
+                <p className="text-gray-400">{selectedBot?.name} a été déployé avec succès.</p>
               </div>
 
-              {/* API Key card */}
               {generatedApiKey && (
                 <div className="bg-[#111118] border border-yellow-500/30 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -485,8 +442,7 @@ export default function DeployBotPage() {
                     <span className="text-sm font-semibold text-yellow-400">Clé API générée</span>
                   </div>
                   <p className="text-xs text-gray-400 mb-3">
-                    ⚠️ Sauvegardez cette clé maintenant — elle ne sera plus affichée en clair.
-                    Elle est déjà injectée dans les variables d&apos;environnement de votre bot.
+                    ⚠️ Sauvegardez cette clé maintenant — elle ne sera plus affichée en clair. Elle est déjà injectée dans les variables d&apos;environnement de votre bot.
                   </p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 text-xs font-mono text-gray-200 bg-black/40 px-3 py-2 rounded-lg truncate">
@@ -502,7 +458,6 @@ export default function DeployBotPage() {
                 </div>
               )}
 
-              {/* Connector info */}
               <div className="bg-[#111118] border border-purple-500/20 rounded-xl p-4 text-sm">
                 <p className="text-gray-400 mb-2">
                   Incluez <code className="text-purple-400">xhrishost-connector.js</code> dans votre bot pour accéder aux commandes de gestion via WhatsApp.
@@ -518,54 +473,55 @@ export default function DeployBotPage() {
 
               <div className="flex gap-3 justify-center pt-2">
                 <Link href="/dashboard/bots" className="btn-primary flex items-center gap-2">Voir mes bots</Link>
-                <button
-                  onClick={() => { setCurrentStep(1); setSelectedBot(null); setEnvVars({}); setDeployLogs([]); setGeneratedApiKey(null); setDeployedBot(null); }}
-                  className="btn-secondary"
-                >Déployer un autre bot</button>
+                <button onClick={resetAll} className="btn-secondary">Déployer un autre bot</button>
               </div>
             </motion.div>
           )}
         </div>
 
-        {/* How it works sidebar */}
+        {/* Sidebar */}
         <div className="space-y-4">
+          {/* Comment ça fonctionne */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <h3 className="font-semibold text-white mb-4">Comment ça fonctionne ?</h3>
             {STEPS.map(s => (
               <div key={s.n} className="flex gap-3 mb-3 last:mb-0">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${currentStep >= s.n ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-500'}`}>{s.n}</div>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                  currentStep >= s.n ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-500'
+                }`}>{s.n}</div>
                 <div>
                   <div className={`text-sm font-medium ${currentStep >= s.n ? 'text-white' : 'text-gray-500'}`}>{s.label}</div>
-                  <div className="text-xs text-gray-500">{s.sub}</div>
+                  <div className="text-xs text-gray-600">{s.sub}</div>
                 </div>
               </div>
             ))}
           </div>
 
+          {/* Documentation */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <h3 className="font-semibold text-white mb-3">Documentation</h3>
-            {DOC_LINKS.map(r => (
-              <button key={r.l} className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0 w-full hover:opacity-80 transition-opacity">
-                <div className="w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <r.Icon className="w-3.5 h-3.5 text-purple-400" />
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="text-xs font-medium text-white">{r.l}</div>
-                  <div className="text-xs text-gray-500">{r.sub}</div>
-                </div>
-                <ExternalLink className="w-3 h-3 text-gray-500" />
-              </button>
-            ))}
+            <div className="space-y-2">
+              {DOC_LINKS.map(d => (
+                <Link key={d.label} href="/docs" className="flex items-start gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors group">
+                  <d.icon className="w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">{d.label}</div>
+                    <div className="text-[10px] text-gray-600">{d.sub}</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
           </div>
 
+          {/* Besoin d'aide */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-2">
-              <MessageSquare className="w-4 h-4 text-purple-400" />
-              <h3 className="text-sm font-semibold text-white">Besoin d'aide ?</h3>
+              <HelpCircle className="w-4 h-4 text-purple-400" />
+              <h3 className="font-semibold text-white text-sm">Besoin d&apos;aide ?</h3>
             </div>
-            <p className="text-xs text-gray-400 mb-3">Notre équipe est là pour vous aider à déployer votre bot.</p>
+            <p className="text-xs text-gray-400 mb-3">Notre équipe est disponible pour vous aider avec le déploiement de votre bot.</p>
             <Link href="/dashboard/support"
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2">
+              className="w-full flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/20 text-purple-300 text-xs font-medium py-2.5 rounded-lg transition-colors">
               <MessageSquare className="w-3.5 h-3.5" /> Contacter le support
             </Link>
           </div>
