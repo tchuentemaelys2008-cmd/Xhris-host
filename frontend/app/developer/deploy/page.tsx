@@ -33,6 +33,26 @@ const parseEnv = (v: any): Record<string, any> => {
   return typeof v === 'object' ? v : {};
 };
 
+const DEFAULT_ENV_TEMPLATES: Record<string, Record<string, any>> = {
+  WHATSAPP: {
+    SESSION_ID:   { label: 'Session ID',          type: 'text',     required: true,  description: 'Session WhatsApp générée sur le site de pairing du bot' },
+    BOT_NAME:     { label: 'Nom du bot',          type: 'text',     required: true },
+    OWNER_NUMBER: { label: 'Numéro propriétaire', type: 'text',     required: true,  description: 'Avec indicatif, sans le + (ex: 237xxxxxxxxx)' },
+    SUDO:         { label: 'Numéros SUDO',        type: 'text',     required: false, description: 'Numéros admin séparés par des virgules' },
+    PREFIX:       { label: 'Préfixe',             type: 'text',     required: false, default: '.' },
+  },
+  TELEGRAM: {
+    BOT_TOKEN: { label: 'Bot Token',  type: 'password', required: true,  description: 'Token obtenu via @BotFather' },
+    BOT_NAME:  { label: 'Nom du bot', type: 'text',     required: true },
+    OWNER_ID:  { label: 'Owner ID',   type: 'text',     required: true,  description: 'Votre ID Telegram numérique' },
+  },
+  DISCORD: {
+    BOT_TOKEN: { label: 'Bot Token', type: 'password', required: true },
+    CLIENT_ID: { label: 'Client ID', type: 'text',     required: true },
+    GUILD_ID:  { label: 'Guild ID',  type: 'text',     required: false },
+  },
+};
+
 const PLATFORM_ICON: Record<string, any> = {
   WHATSAPP: Smartphone,
   TELEGRAM: MessageSquare,
@@ -274,7 +294,10 @@ export default function DeployBotPage() {
                 <p className="text-xs text-gray-400 mb-4">Remplissez les paramètres requis pour faire fonctionner le bot.</p>
 
                 {(() => {
-                  const envTemplate = parseEnv(selectedBot.envTemplate);
+                  const adminTemplate = parseEnv(selectedBot.envTemplate);
+                  const platform = (selectedBot.platform || 'WHATSAPP').toUpperCase();
+                  const defaults = DEFAULT_ENV_TEMPLATES[platform] || {};
+                  const envTemplate = { ...defaults, ...adminTemplate };
                   const entries = Object.entries(envTemplate);
 
                   if (entries.length === 0) {
@@ -350,7 +373,9 @@ export default function DeployBotPage() {
                 <button onClick={() => setCurrentStep(1)} className="btn-secondary">← Retour</button>
                 <button
                   onClick={() => {
-                    const envTemplate = parseEnv(selectedBot.envTemplate);
+                    const _adminTpl = parseEnv(selectedBot.envTemplate);
+                    const _platform = (selectedBot.platform || 'WHATSAPP').toUpperCase();
+                    const envTemplate = { ...(DEFAULT_ENV_TEMPLATES[_platform] || {}), ..._adminTpl };
                     for (const [key, cfg] of Object.entries(envTemplate) as [string, any][]) {
                       if (cfg.required && !envVars[key]?.trim() && !cfg.default) {
                         toast.error(`${cfg.label || key} est requis`);
