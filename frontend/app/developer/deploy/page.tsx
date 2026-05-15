@@ -1,16 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Star, CheckCircle, ArrowRight, Zap, ExternalLink, Bot,
   MessageSquare, Smartphone, Settings, Wrench, BookOpen,
-  Loader2, Copy, Key, Download, HelpCircle,
+  Loader2, Copy, Key, Download, HelpCircle, AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { extractApiList, marketplaceApi } from '@/lib/api';
+import { extractApiList, extractApiData, marketplaceApi, botsApi } from '@/lib/api';
 
 const STEPS = [
   { n: 1, label: 'Choisir un bot',  sub: 'Sélectionnez le bot à déployer' },
@@ -20,12 +20,10 @@ const STEPS = [
 ];
 
 const DOC_LINKS = [
-  { icon: BookOpen, label: 'Comment déployer un bot',     sub: 'Guide étape par étape' },
-  { icon: Settings, label: 'Variables d\'environnement',  sub: 'Comprendre la configuration' },
-  { icon: Wrench,   label: 'Problèmes courants',          sub: 'Solutions aux erreurs fréquentes' },
+  { icon: BookOpen, label: 'Comment déployer un bot',    sub: 'Guide étape par étape' },
+  { icon: Settings, label: 'Variables d\'environnement', sub: 'Comprendre la configuration' },
+  { icon: Wrench,   label: 'Problèmes courants',         sub: 'Solutions aux erreurs fréquentes' },
 ];
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const parseEnv = (v: any): Record<string, any> => {
   if (!v) return {};
@@ -68,6 +66,17 @@ export default function DeployBotPage() {
   const [deployedBot, setDeployedBot]         = useState<any>(null);
   const [generatedApiKey, setGeneratedApiKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery]         = useState('');
+  const [deployError, setDeployError]         = useState<string | null>(null);
+
+  const pollingRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const logsDivRef   = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (logsDivRef.current) logsDivRef.current.scrollTop = logsDivRef.current.scrollHeight;
+  }, [deployLogs]);
+
+  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
   const { data, isLoading } = useQuery({
     queryKey: ['marketplace-bots'],
@@ -88,58 +97,100 @@ export default function DeployBotPage() {
     setDeployLogs(prev => [...prev, `[${t}] ${msg}`]);
   };
 
+  const stopPolling = () => {
+    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+  };
+
   const handleDeploy = async () => {
     if (!selectedBot) return;
     setDeploying(true);
     setDeployLogs([]);
+    setDeployError(null);
+
     try {
-      addLog('Préparation du déploiement...');
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : '';
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || '/api'}/bots/deploy`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            name: selectedBot.name,
-            platform: selectedBot.platform || 'WHATSAPP',
-            marketplaceBotId: selectedBot.id,
-            envVars: { ...envVars, ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}) },
-            sessionLink: envVars.SESSION_ID || envVars.session_id || '',
-          }),
-        }
-      );
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+      const res = await fetch(`${apiBase}/bots/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: selectedBot.name,
+          platform: selectedBot.platform || 'WHATSAPP',
+          marketplaceBotId: selectedBot.id,
+          envVars: { ...envVars, ...(selectedBot.githubUrl ? { GITHUB_URL: selectedBot.githubUrl } : {}) },
+          sessionLink: envVars.SESSION_ID || envVars.session_id || '',
+        }),
+      });
+
       const txt = await res.text();
       let payload: any;
       try { payload = JSON.parse(txt); } catch { payload = { success: false, message: 'Réponse invalide du serveur' }; }
 
-      if (payload.success) {
-        addLog('✅ Bot créé avec succès !');
-        await sleep(1500); addLog('Installation des dépendances...');
-        await sleep(1000); addLog('Injection du connector XHRIS HOST...');
-        await sleep(1000); addLog('Démarrage du conteneur...');
-        addLog('✅ Bot en ligne !');
-        setDeployedBot(payload.data);
-        if (payload.data?.apiKey) setGeneratedApiKey(payload.data.apiKey);
-        await sleep(500);
-        setCurrentStep(4);
-        toast.success('Bot déployé avec succès !');
-      } else {
+      if (!payload.success) {
         const msg = payload.message || 'Erreur inconnue';
         addLog(`❌ Erreur: ${msg}`);
-        console.error('[XHRIS DEPLOY]', msg, payload);
+        setDeployError(msg);
         toast.error(msg);
+        setDeploying(false);
+        return;
       }
+
+      const botId: string = payload.data?.id;
+      if (payload.data?.apiKey) setGeneratedApiKey(payload.data.apiKey);
+
+      addLog(`🚀 Déploiement initié — ID: ${botId}`);
+      startTimeRef.current = Date.now();
+
+      pollingRef.current = setInterval(async () => {
+        try {
+          if (Date.now() - startTimeRef.current > 120_000) {
+            stopPolling();
+            setDeploying(false);
+            setDeployError('Timeout (2 min) — vérifiez l\'état du bot dans le dashboard.');
+            return;
+          }
+
+          const logsRes = await botsApi.getLogs(botId);
+          const logsData = extractApiData(logsRes) || {};
+          const lines: string[] = Array.isArray(logsData.logs) ? logsData.logs : [];
+          const status: string = logsData.status || 'STARTING';
+
+          if (lines.length > 0) {
+            setDeployLogs(prev => {
+              const head = prev[0] || '';
+              return [head, ...lines].filter(Boolean);
+            });
+          }
+
+          if (status === 'RUNNING') {
+            stopPolling();
+            setDeployLogs(prev => [...prev, '✅ Bot connecté avec succès !']);
+            setDeployedBot(payload.data);
+            setDeploying(false);
+            setCurrentStep(4);
+            toast.success('Bot déployé avec succès !');
+          } else if (status === 'ERROR') {
+            stopPolling();
+            const errLine = [...lines].reverse().find((l: string) => /erreur|error|failed/i.test(l))
+              || 'Erreur de déploiement Docker — vérifiez la config du bot.';
+            setDeployLogs(prev => [...prev, `❌ ${errLine}`]);
+            setDeployError(errLine);
+            setDeploying(false);
+          }
+        } catch { /* keep polling on transient network errors */ }
+      }, 2000);
+
     } catch (err: any) {
       addLog(`❌ Erreur réseau: ${err.message || 'Connexion impossible'}`);
-      console.error('[XHRIS DEPLOY] network error', err);
+      setDeployError(err.message || 'Connexion impossible');
       toast.error('Erreur de connexion au serveur');
-    } finally {
       setDeploying(false);
     }
   };
 
   const resetAll = () => {
+    stopPolling();
     setCurrentStep(1);
     setSelectedBot(null);
     setEnvVars({});
@@ -147,6 +198,7 @@ export default function DeployBotPage() {
     setDeployedBot(null);
     setGeneratedApiKey(null);
     setSearchQuery('');
+    setDeployError(null);
   };
 
   return (
@@ -190,7 +242,6 @@ export default function DeployBotPage() {
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Content */}
         <div className="lg:col-span-2 space-y-4">
 
           {/* ── STEP 1 ── */}
@@ -398,14 +449,15 @@ export default function DeployBotPage() {
               <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
                 <h2 className="font-semibold text-white mb-4">3. Déploiement</h2>
 
-                {!deploying && !deployedBot && (
+                {/* Initial state: show summary + launch button */}
+                {!deploying && !deployError && (
                   <>
                     <div className="space-y-0 mb-6 rounded-xl overflow-hidden border border-white/5">
                       {[
-                        { l: 'Bot',                    v: selectedBot.name },
-                        { l: 'Plateforme',             v: selectedBot.platform },
-                        { l: 'Variables configurées',  v: `${Object.keys(envVars).filter(k => envVars[k]).length} variable(s)` },
-                        { l: 'Coût',                   v: `${selectedBot.coinsPerDay || 10} Coins / jour` },
+                        { l: 'Bot',                   v: selectedBot.name },
+                        { l: 'Plateforme',            v: selectedBot.platform },
+                        { l: 'Variables configurées', v: `${Object.keys(envVars).filter(k => envVars[k]).length} variable(s)` },
+                        { l: 'Coût',                  v: `${selectedBot.coinsPerDay || 10} Coins / jour` },
                       ].map((row, i, arr) => (
                         <div key={row.l} className={`flex justify-between px-4 py-3 text-sm ${i < arr.length - 1 ? 'border-b border-white/5' : ''} bg-[#1A1A24]`}>
                           <span className="text-gray-400">{row.l}</span>
@@ -422,26 +474,62 @@ export default function DeployBotPage() {
                   </>
                 )}
 
-                {deploying && (
+                {/* Active deploy or error: show real logs */}
+                {(deploying || !!deployError) && (
                   <div className="space-y-3">
                     <div className="flex items-center gap-3 mb-2">
-                      <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
-                      <span className="text-white font-medium text-sm">Déploiement en cours...</span>
+                      {deploying
+                        ? <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+                        : <AlertCircle className="w-5 h-5 text-red-400" />
+                      }
+                      <span className="text-white font-medium text-sm">
+                        {deploying ? 'Déploiement en cours...' : 'Échec du déploiement'}
+                      </span>
                     </div>
-                    <div className="bg-black/40 rounded-lg p-4 font-mono text-xs text-gray-400 space-y-1 max-h-48 overflow-y-auto">
-                      {deployLogs.map((log, i) => (
-                        <div key={i} className="flex gap-2">
-                          <span className="text-purple-500 flex-shrink-0">&gt;</span>
-                          <span>{log}</span>
-                        </div>
-                      ))}
+
+                    <div
+                      ref={logsDivRef}
+                      className="bg-black/40 rounded-lg p-4 font-mono text-xs text-gray-400 space-y-1 max-h-64 overflow-y-auto"
+                    >
+                      {deployLogs.length === 0
+                        ? <span className="text-gray-600">En attente des logs Docker...</span>
+                        : deployLogs.map((log, i) => (
+                          <div key={i} className="flex gap-2">
+                            <span className="text-purple-500 flex-shrink-0">&gt;</span>
+                            <span className="break-all">{log}</span>
+                          </div>
+                        ))
+                      }
                     </div>
-                    <p className="text-xs text-gray-500 text-center">Veuillez patienter, cela peut prendre quelques minutes...</p>
+
+                    {deployError && (
+                      <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                        <p className="text-red-400 text-xs">{deployError}</p>
+                      </div>
+                    )}
+
+                    {deploying && (
+                      <p className="text-xs text-gray-500 text-center">
+                        Installation des dépendances et démarrage du container en cours...
+                      </p>
+                    )}
+
+                    {deployError && (
+                      <div className="flex gap-3 pt-1">
+                        <button onClick={() => setCurrentStep(2)} className="btn-secondary flex-1">← Retour</button>
+                        <button
+                          onClick={handleDeploy}
+                          className="btn-primary flex-1 flex items-center justify-center gap-2"
+                        >
+                          <Zap className="w-4 h-4" /> Réessayer
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {!deploying && !deployedBot && (
+              {!deploying && !deployError && (
                 <div className="flex justify-between">
                   <button onClick={() => setCurrentStep(2)} className="btn-secondary">← Retour</button>
                 </div>
@@ -506,7 +594,6 @@ export default function DeployBotPage() {
 
         {/* Sidebar */}
         <div className="space-y-4">
-          {/* Comment ça fonctionne */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <h3 className="font-semibold text-white mb-4">Comment ça fonctionne ?</h3>
             {STEPS.map(s => (
@@ -522,7 +609,6 @@ export default function DeployBotPage() {
             ))}
           </div>
 
-          {/* Documentation */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <h3 className="font-semibold text-white mb-3">Documentation</h3>
             <div className="space-y-2">
@@ -538,7 +624,6 @@ export default function DeployBotPage() {
             </div>
           </div>
 
-          {/* Besoin d'aide */}
           <div className="bg-[#111118] border border-white/5 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-2">
               <HelpCircle className="w-4 h-4 text-purple-400" />
