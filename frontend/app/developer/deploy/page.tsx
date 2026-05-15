@@ -263,14 +263,23 @@ export default function DeployBotPage() {
                         <label className="text-sm font-medium text-white">Session ID</label>
                         <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
                       </div>
-                      {selectedBot.sessionUrl && (
-                        <a href={selectedBot.sessionUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
-                          <Key className="w-3 h-3" />
-                          Obtenir ma session
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
+                      {(() => {
+                        const sessionHref = selectedBot.sessionUrl || (
+                          selectedBot.platform?.toUpperCase() === 'TELEGRAM' ? 'https://core.telegram.org/bots' :
+                          selectedBot.platform?.toUpperCase() === 'DISCORD'  ? 'https://discord.com/developers/applications' :
+                          '/docs#session'
+                        );
+                        const hasCustomUrl = !!selectedBot.sessionUrl;
+                        return (
+                          <a href={sessionHref} target="_blank" rel="noopener noreferrer"
+                            title={hasCustomUrl ? undefined : "Aucune URL spécifique fournie par le développeur — consultez le guide général"}
+                            className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
+                            <Key className="w-3 h-3" />
+                            Obtenir ma session
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        );
+                      })()}
                     </div>
                     <input
                       className="input-field font-mono text-xs"
@@ -342,9 +351,15 @@ export default function DeployBotPage() {
                   {/* Champs supplémentaires depuis envTemplate (hors champs standard) */}
                   {(() => {
                     const standard = ['SESSION_ID','BOT_NAME','OWNER_NUMBER','SUDO','PREFIX'];
-                    const extra = Object.entries(selectedBot.envTemplate || {})
-                      .filter(([k]) => !standard.includes(k));
-                    if (extra.length === 0) return null;
+                    const tpl = typeof selectedBot.envTemplate === 'string'
+                      ? (() => { try { return JSON.parse(selectedBot.envTemplate); } catch { return {}; } })()
+                      : (selectedBot.envTemplate || {});
+                    const extra = Object.entries(tpl).filter(([k]) => !standard.includes(k));
+                    if (extra.length === 0) return (
+                      <p className="text-xs text-gray-600 pt-2 border-t border-white/5">
+                        Les variables ci-dessus sont suffisantes pour ce bot.
+                      </p>
+                    );
                     return (
                       <>
                         <div className="border-t border-white/5 pt-4">

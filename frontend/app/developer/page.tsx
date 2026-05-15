@@ -9,7 +9,7 @@ import {
   Upload, ArrowRight, Loader2, BookOpen, Trophy, Gift,
   FileArchive, X, Download,
 } from 'lucide-react';
-import { developerApi } from '@/lib/api';
+import { developerApi, extractApiList } from '@/lib/api';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -37,10 +37,11 @@ export default function DeveloperPage() {
     enabled: !!user,
   });
 
-  const _raw = (data as any)?.data?.bots ?? (data as any)?.data ?? [];
-  const publications: any[] = Array.isArray(_raw) ? _raw : [];
-  const hasApproved = publications.some((p: any) => p.status === 'PUBLISHED' || p.status === 'APPROVED');
-  const hasPending = publications.some((p: any) => p.status === 'PENDING');
+  const _payload = (data as any)?.data;
+  const _bots    = _payload?.data ?? _payload?.bots ?? _payload;
+  const publications: any[] = Array.isArray(_bots) ? _bots : [];
+  const hasApproved = publications.some((p: any) => p?.status === 'PUBLISHED' || p?.status === 'APPROVED');
+  const hasPending  = publications.some((p: any) => p?.status === 'PENDING');
 
   const submitMutation = useMutation({
     mutationFn: () => {

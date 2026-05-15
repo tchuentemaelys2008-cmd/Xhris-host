@@ -33,7 +33,7 @@ export default function AdminMarketplacePage() {
   const [rejectReason, setReason] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [editMode, setEditMode]   = useState(false);
-  const [editData, setEditData]   = useState<{ sessionUrl: string; githubUrl: string; demoUrl: string; coinsPerDay: string }>({ sessionUrl: '', githubUrl: '', demoUrl: '', coinsPerDay: '' });
+  const [editData, setEditData]   = useState<{ sessionUrl: string; githubUrl: string; demoUrl: string; coinsPerDay: string; envTemplate: string }>({ sessionUrl: '', githubUrl: '', demoUrl: '', coinsPerDay: '', envTemplate: '{}' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-marketplace-bots', search, statusFilter, page],
@@ -73,17 +73,24 @@ export default function AdminMarketplacePage() {
       githubUrl:   bot.githubUrl   || '',
       demoUrl:     bot.demoUrl     || '',
       coinsPerDay: String(bot.coinsPerDay || 10),
+      envTemplate: JSON.stringify(bot.envTemplate || {}, null, 2),
     });
     setEditMode(true);
   };
 
   const updateMutation = useMutation({
-    mutationFn: () => (adminApi as any).updateMarketplaceBot(selected.id, {
-      sessionUrl:  editData.sessionUrl  || null,
-      githubUrl:   editData.githubUrl   || null,
-      demoUrl:     editData.demoUrl     || null,
-      coinsPerDay: Number(editData.coinsPerDay) || 10,
-    }),
+    mutationFn: () => {
+      let parsedEnv: any = {};
+      try { parsedEnv = JSON.parse(editData.envTemplate || '{}'); }
+      catch { toast.error('JSON invalide dans les variables'); throw new Error('invalid json'); }
+      return (adminApi as any).updateMarketplaceBot(selected.id, {
+        sessionUrl:  editData.sessionUrl  || null,
+        githubUrl:   editData.githubUrl   || null,
+        demoUrl:     editData.demoUrl     || null,
+        coinsPerDay: Number(editData.coinsPerDay) || 10,
+        envTemplate: parsedEnv,
+      });
+    },
     onSuccess: () => {
       toast.success('Bot mis à jour');
       qc.invalidateQueries({ queryKey: ['admin-marketplace-bots'] });
@@ -340,6 +347,18 @@ export default function AdminMarketplacePage() {
                         value={editData.coinsPerDay}
                         onChange={e => setEditData(d => ({ ...d, coinsPerDay: e.target.value }))}
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">Variables d&apos;environnement (JSON)</label>
+                      <textarea
+                        className="input-field w-full font-mono text-xs resize-none"
+                        rows={7}
+                        placeholder={'{\n  "API_KEY": {"label":"Clé API","type":"password","required":true}\n}'}
+                        value={editData.envTemplate}
+                        onChange={e => setEditData(d => ({ ...d, envTemplate: e.target.value }))}
+                      />
+                      <p className="text-xs text-gray-600 mt-1">JSON — définit les champs de configuration affichés à l&apos;utilisateur lors du déploiement.</p>
                     </div>
 
                     <button

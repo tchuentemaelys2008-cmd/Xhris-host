@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { signOut, useSession } from 'next-auth/react';
 import { useQuery } from '@tanstack/react-query';
-import { developerApi } from '@/lib/api';
+import { developerApi, extractApiList } from '@/lib/api';
 import {
   LayoutDashboard, Bot, Server, Store, Rocket, Wallet,
   Code, BookOpen, BarChart3, Trophy, Gift, Users, Star,
@@ -62,16 +62,23 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const { data: pubData } = useQuery({
+  const { data: pubData, isSuccess: pubSuccess, isError: pubError } = useQuery({
     queryKey: ['dev-publications'],
     queryFn: () => developerApi.getPublications(),
     enabled: !!user,
+    retry: false,
   });
-  const _rawPubs = (pubData as any)?.data?.bots ?? (pubData as any)?.data;
-  const publications: any[] = Array.isArray(_rawPubs) ? _rawPubs : [];
-  const hasApproved = publications.some((p: any) => p.status === 'PUBLISHED' || p.status === 'APPROVED');
 
-  // Pages accessible à tous les utilisateurs (pas besoin d'être développeur)
+  // Axios: pubData.data = {success,message,data:[bots]}  →  pubData.data.data = [bots]
+  const _payload = (pubData as any)?.data;
+  const _bots    = _payload?.data ?? _payload?.bots ?? _payload;
+  const publications: any[] = Array.isArray(_bots) ? _bots : [];
+  const hasApproved = publications.some((p: any) =>
+    p?.status === 'PUBLISHED' || p?.status === 'APPROVED'
+  );
+  const querySettled = pubSuccess || pubError;
+
+  // Pages accessibles à tous (pas besoin d'être développeur)
   const openPages = ['/developer/deploy', '/developer/wallet'];
   const isOpenPage = openPages.some(p => pathname.startsWith(p));
 
@@ -79,8 +86,8 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
   const devOnlyPages = ['/developer/hub', '/developer/publications', '/developer/statistics', '/developer/earnings', '/developer/leaderboard', '/developer/referral'];
   const isDevOnlyPage = devOnlyPages.some(p => pathname.startsWith(p));
 
-  // Si non-développeur essaie d'accéder à une page dev : rediriger vers /developer
-  if (pubData !== undefined && !hasApproved && isDevOnlyPage) {
+  // Rediriger les non-développeurs hors des pages dev-only
+  if (querySettled && !hasApproved && isDevOnlyPage) {
     router.replace('/developer');
     return null;
   }
