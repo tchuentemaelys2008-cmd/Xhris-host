@@ -263,23 +263,14 @@ export default function DeployBotPage() {
                         <label className="text-sm font-medium text-white">Session ID</label>
                         <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">Requis</span>
                       </div>
-                      {(() => {
-                        const sessionHref = selectedBot.sessionUrl || (
-                          selectedBot.platform?.toUpperCase() === 'TELEGRAM' ? 'https://core.telegram.org/bots' :
-                          selectedBot.platform?.toUpperCase() === 'DISCORD'  ? 'https://discord.com/developers/applications' :
-                          '/docs#session'
-                        );
-                        const hasCustomUrl = !!selectedBot.sessionUrl;
-                        return (
-                          <a href={sessionHref} target="_blank" rel="noopener noreferrer"
-                            title={hasCustomUrl ? undefined : "Aucune URL spécifique fournie par le développeur — consultez le guide général"}
-                            className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
-                            <Key className="w-3 h-3" />
-                            Obtenir ma session
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        );
-                      })()}
+                      {selectedBot.sessionUrl && (
+                        <a href={selectedBot.sessionUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 px-2.5 py-1 rounded-lg transition-colors font-medium">
+                          <Key className="w-3 h-3" />
+                          Obtenir ma session
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                     </div>
                     <input
                       className="input-field font-mono text-xs"
