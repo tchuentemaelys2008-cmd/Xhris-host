@@ -489,43 +489,104 @@ paymentsRouter.post('/initiate', authMiddleware, async (req: AuthRequest, res: R
 paymentsRouter.post('/fapshi/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { packId, coins, amount, phone } = req.body;
-    if (!packId || !coins || !amount || !phone) return sendError(res, 'Paramètres manquants', 400);
+    if (!packId || !coins || !amount) {
+      return sendError(res, 'Paramètres manquants (packId, coins, amount requis)', 400);
+    }
 
-    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
     const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-    const amountXAF = Math.round(amount * 655);
+    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
+      ? 'https://sandbox.fapshi.com'
+      : 'https://live.fapshi.com';
+
+    const amountXAF = Math.max(100, Math.round(Number(amount) * 655));
     const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    const APP_URL = (process.env.FRONTEND_URL || 'https://xhrishost.site').replace(/\/$/, '');
+    const API_URL = (process.env.BACKEND_URL  || 'https://api.xhrishost.site').replace(/\/$/, '');
+
+    const redirectUrl = `${APP_URL}/dashboard/coins/buy?success=1&ref=${reference}`;
+    const webhookUrl  = `${API_URL}/api/payments/fapshi/webhook`;
 
     // Create pending payment in DB
     await prisma.payment.create({
       data: { userId: req.user!.id, amount, method: 'FAPSHI' as any, reference, packId, status: 'PENDING' },
     });
 
-    // Call Fapshi API if credentials available
-    if (FAPSHI_API_KEY && FAPSHI_API_USER) {
-      const fapshiRes = await fetch('https://live.fapshi.com/initiate-pay', {
+    if (!FAPSHI_API_KEY || !FAPSHI_API_USER) {
+      console.error('[Fapshi] Clés API manquantes (FAPSHI_API_KEY / FAPSHI_API_USER)');
+      return sendError(res, 'Paiement Fapshi non configuré côté serveur. Contactez l\'administrateur.', 500);
+    }
+
+    const fapshiPayload: any = {
+      amount: amountXAF,
+      message: `XHRIS Host - ${coins} Coins (${packId})`,
+      externalId: reference,
+      redirectUrl,
+      webhookUrl,
+      email: req.user!.email || undefined,
+      userId: req.user!.id,
+    };
+    if (phone && String(phone).trim()) {
+      fapshiPayload.phone = String(phone).replace(/\s/g, '').replace(/^\+/, '');
+    }
+
+    let fapshiStatus = 0;
+    let rawText = '';
+    try {
+      const r = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'apiuser': FAPSHI_API_USER,
           'apikey': FAPSHI_API_KEY,
         },
-        body: JSON.stringify({
-          amount: amountXAF,
-          phone: phone.replace(/\s/g, '').replace(/^\+/, ''),
-          message: `XHRIS Host - ${coins} Coins (${packId})`,
-          externalId: reference,
-          redirectUrl: `${process.env.FRONTEND_URL || 'https://xhris-host-frontend.vercel.app'}/dashboard/coins/buy?success=1`,
-        }),
+        body: JSON.stringify(fapshiPayload),
       });
-      const fapshiData: any = await fapshiRes.json();
-      if (!fapshiRes.ok) return sendError(res, fapshiData?.message || 'Erreur Fapshi', 400);
-      sendSuccess(res, { reference, link: fapshiData?.link }, 'Paiement Fapshi initié');
-    } else {
-      // No API key — return a placeholder response
-      sendSuccess(res, { reference, link: null }, 'Paiement en attente de configuration Fapshi');
+      fapshiStatus = r.status;
+      rawText = await r.text();
+    } catch (e: any) {
+      console.error('[Fapshi] Erreur réseau:', e?.message);
+      await prisma.payment.update({
+        where: { reference }, data: { status: 'FAILED' },
+      }).catch(() => {});
+      return sendError(res, 'Service de paiement Fapshi injoignable. Réessayez.', 502);
     }
-  } catch (err) { sendError(res, 'Erreur lors de l\'initiation Fapshi', 500); }
+
+    let fapshiData: any = null;
+    try { fapshiData = rawText ? JSON.parse(rawText) : null; } catch { fapshiData = { raw: rawText }; }
+
+    if (fapshiStatus < 200 || fapshiStatus >= 300) {
+      console.error('[Fapshi] Réponse non-OK:', fapshiStatus, fapshiData);
+      await prisma.payment.update({
+        where: { reference }, data: { status: 'FAILED' },
+      }).catch(() => {});
+      return sendError(
+        res,
+        fapshiData?.message || `Erreur Fapshi (${fapshiStatus})`,
+        400
+      );
+    }
+
+    const link    = fapshiData?.link;
+    const transId = fapshiData?.transId;
+
+    if (!link) {
+      console.error('[Fapshi] Pas de "link" dans la réponse:', fapshiData);
+      return sendError(res, 'Réponse Fapshi invalide (pas de lien de paiement)', 502);
+    }
+
+    return sendSuccess(res, {
+      reference,
+      link,
+      paymentUrl: link,
+      transId: transId || null,
+    }, 'Paiement Fapshi initié');
+  } catch (err: any) {
+    console.error('[Fapshi initiate] erreur:', err?.message);
+    return sendError(res, 'Erreur lors de l\'initiation Fapshi', 500);
+  }
 });
 
 // POST /api/payments/geniuspay/initiate — GeniusPay checkout
@@ -578,62 +639,114 @@ paymentsRouter.post('/geniuspay/initiate', authMiddleware, async (req: AuthReque
 // POST /api/payments/fapshi/webhook — NO AUTH (called by Fapshi)
 paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
   try {
-    const { transId, status, externalId } = req.body;
-    if (!externalId) return res.json({ success: true });
+    const { transId, status, externalId } = req.body || {};
+    console.log('[Fapshi webhook] reçu:', { transId, status, externalId });
 
-    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+    if (!transId && !externalId) {
+      return res.json({ success: true });
+    }
+
+    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
     const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
+      ? 'https://sandbox.fapshi.com'
+      : 'https://live.fapshi.com';
 
     let paymentStatus = status;
+    let verifiedData: any = null;
     if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
       try {
-        const verifyRes = await fetch(`https://live.fapshi.com/payment-status/${transId}`, {
+        const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
           headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
         });
-        const d: any = await verifyRes.json();
-        paymentStatus = d?.status || status;
-      } catch {}
+        verifiedData = await verifyRes.json();
+        paymentStatus = verifiedData?.status || status;
+        console.log('[Fapshi webhook] statut vérifié:', paymentStatus);
+      } catch (e: any) {
+        console.error('[Fapshi webhook] échec vérification:', e?.message);
+      }
+    }
+
+    const ref = externalId || verifiedData?.externalId;
+    if (!ref) {
+      console.error('[Fapshi webhook] pas de référence');
+      return res.json({ success: true });
     }
 
     if (paymentStatus === 'SUCCESSFUL') {
-      const payment = await prisma.payment.findUnique({ where: { reference: externalId } });
-      if (payment && payment.status === 'PENDING') {
-        const pack = payment.packId
-          ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
-          : null;
-        const coins = pack ? (pack.coins + (pack.bonus || 0)) : Math.floor((payment.amount || 0) * 10);
-        await prisma.$transaction([
-          prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
-          ...(coins > 0 ? [
-            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
-            prisma.transaction.create({
-              data: {
-                userId: payment.userId,
-                type: 'PURCHASE' as any,
-                amount: coins,
-                description: `Achat ${coins} coins via Fapshi Mobile Money`,
-                reference: externalId,
-              },
-            }),
-          ] : []),
-        ]);
-        if (coins > 0) {
-          await notify(payment.userId, {
-            title: '💰 Paiement reçu !',
-            message: `${coins} coins ont été crédités à votre compte.`,
-            type: 'PAYMENT',
-            link: '/dashboard/coins',
-          });
-        }
+      const payment = await prisma.payment.findUnique({ where: { reference: ref } });
+      if (!payment) {
+        console.error('[Fapshi webhook] payment introuvable:', ref);
+        return res.json({ success: true });
       }
-    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
+
+      if (payment.status === 'COMPLETED') {
+        return res.json({ success: true, alreadyProcessed: true });
+      }
+
+      const pack = payment.packId
+        ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
+        : null;
+
+      const HARDCODED: Record<string, { coins: number; bonus: number }> = {
+        'pack-500':   { coins: 500,   bonus: 0    },
+        'pack-1000':  { coins: 1000,  bonus: 100  },
+        'pack-2500':  { coins: 2500,  bonus: 300  },
+        'pack-5000':  { coins: 5000,  bonus: 700  },
+        'pack-10000': { coins: 10000, bonus: 1500 },
+      };
+      const hc = payment.packId ? HARDCODED[payment.packId] : null;
+
+      const coins = pack
+        ? (pack.coins + (pack.bonus || 0))
+        : hc
+          ? (hc.coins + hc.bonus)
+          : Math.floor((payment.amount || 0) * 10);
+
+      await prisma.$transaction([
+        prisma.payment.update({ where: { reference: ref }, data: { status: 'COMPLETED' } }),
+        ...(coins > 0 ? [
+          prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
+          prisma.transaction.create({
+            data: {
+              userId: payment.userId,
+              type: 'PURCHASE' as any,
+              amount: coins,
+              description: `Achat ${coins} coins via Fapshi Mobile Money`,
+              reference: ref,
+            },
+          }),
+        ] : []),
+      ]);
+
+      if (coins > 0) {
+        await notify(payment.userId, {
+          title: '💰 Paiement reçu !',
+          message: `${coins} coins ont été crédités à votre compte.`,
+          type: 'PAYMENT',
+          link: '/dashboard/coins',
+        }).catch(() => {});
+      }
+
+      console.log('[Fapshi webhook] paiement complété:', ref, `+${coins} coins`);
+    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED' || paymentStatus === 'EXPIRED') {
       await prisma.payment.updateMany({
-        where: { reference: externalId, status: 'PENDING' },
+        where: { reference: ref, status: 'PENDING' },
         data: { status: 'FAILED' },
       });
+      console.log('[Fapshi webhook] paiement échoué:', ref, paymentStatus);
     }
+
     res.json({ success: true });
-  } catch { res.status(500).json({ success: false }); }
+  } catch (e: any) {
+    console.error('[Fapshi webhook] erreur:', e?.message);
+    res.status(500).json({ success: false });
+  }
+});
+
+// GET /api/payments/fapshi/webhook — Fapshi peut tester le webhook en GET
+paymentsRouter.get('/fapshi/webhook', async (_req: any, res: Response) => {
+  res.json({ ok: true, message: 'XHRIS Host Fapshi webhook endpoint' });
 });
 
 // GET /api/payments/fapshi/verify/:reference
