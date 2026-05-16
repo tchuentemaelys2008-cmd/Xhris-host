@@ -105,17 +105,44 @@ export async function deployBotContainer(
     appendBotLog(botId, `Using detected entry point: ${entry}`);
   }
 
-  // Native build tools needed for sharp, bcrypt, sqlite3, etc.
+  if (packageJson) {
+    const deps = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) };
+    const needsNodeAddonApi = !!(deps.sharp || deps['@whiskeysockets/baileys']);
+    if (needsNodeAddonApi && !deps['node-addon-api']) {
+      packageJson.dependencies = packageJson.dependencies || {};
+      packageJson.dependencies['node-addon-api'] = '^7.1.0';
+      fs.writeFileSync(pkgPath, JSON.stringify(packageJson, null, 2));
+      appendBotLog(botId, 'Injected node-addon-api dependency for sharp');
+    }
+  }
+
   const startSh = [
     '#!/bin/sh',
     'set -e',
-    'echo "[XHRIS] Installing system build tools..."',
-    'apk add --no-cache python3 make g++ vips-dev git >/dev/null 2>&1 || true',
-    'if [ -f package.json ]; then',
-    '  echo "[XHRIS] Installing dependencies..."',
-    '  npm install --omit=dev --no-audit --no-fund 2>&1',
-    '  echo "[XHRIS] Dependencies installed."',
+    'echo "[XHRIS] Preparing environment..."',
+    '',
+    '# Install system build tools (one-time per container)',
+    'if [ ! -f /tmp/.xhris-tools-installed ]; then',
+    '  echo "[XHRIS] Installing system build tools (first run)..."',
+    '  apk add --no-cache python3 make g++ vips-dev git curl >/dev/null 2>&1 || echo "[XHRIS] apk add skipped"',
+    '  touch /tmp/.xhris-tools-installed',
     'fi',
+    '',
+    '# Force sharp to use prebuilt binaries (no compilation)',
+    'export SHARP_IGNORE_GLOBAL_LIBVIPS=1',
+    'export npm_config_build_from_source=false',
+    '',
+    'if [ -f package.json ] && [ ! -d node_modules ]; then',
+    '  echo "[XHRIS] Installing dependencies (this may take 2-3 min)..."',
+    '  npm install --omit=dev --no-audit --no-fund --prefer-offline 2>&1 || {',
+    '    echo "[XHRIS] First install failed, retrying without optional deps..."',
+    '    npm install --omit=dev --omit=optional --no-audit --no-fund 2>&1',
+    '  }',
+    '  echo "[XHRIS] Dependencies installed successfully."',
+    'elif [ -d node_modules ]; then',
+    '  echo "[XHRIS] node_modules already present, skipping install."',
+    'fi',
+    '',
     'echo "[XHRIS] Starting bot..."',
     `exec ${startCommand}`,
     '',
@@ -126,8 +153,8 @@ export async function deployBotContainer(
   const createCmd = [
     `${DOCKER} create`,
     `--name ${containerName}`,
-    '--memory=512m --cpus=0.5',
-    '--restart unless-stopped',
+    '--memory=768m --memory-swap=1g --cpus=1.0',
+    '--restart on-failure:3',
     envFlags,
     'node:20-alpine',
     'sh',
@@ -206,40 +233,63 @@ export function followBotContainerLogs(
   onLine: (line: string, stream: 'stdout' | 'stderr') => void,
   onExit?: (code: number | null) => void,
 ): () => void {
-  const child = spawn(DOCKER, ['logs', '-f', '--tail', 'all', `xhris-bot-${botId}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  let killed = false;
+  let currentChild: any = null;
 
-  let closed = false;
-  const consume = (stream: 'stdout' | 'stderr') => {
-    let buffer = '';
-    child[stream].on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf8');
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        appendBotLog(botId, stream === 'stderr' ? `[stderr] ${line}` : line);
-        onLine(line, stream);
+  const startStream = () => {
+    if (killed) return;
+    const child = spawn(DOCKER, ['logs', '-f', '--tail', 'all', `xhris-bot-${botId}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    currentChild = child;
+
+    const consume = (stream: 'stdout' | 'stderr') => {
+      let buffer = '';
+      child[stream].on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8');
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          appendBotLog(botId, stream === 'stderr' ? `[stderr] ${line}` : line);
+          onLine(line, stream);
+        }
+      });
+    };
+
+    consume('stdout');
+    consume('stderr');
+
+    child.on('error', (err) => {
+      appendBotLog(botId, `Docker log stream error: ${err.message}`);
+    });
+
+    child.on('close', async (code) => {
+      if (killed) { onExit?.(code); return; }
+      try {
+        const { execSync } = require('child_process');
+        const state = execSync(
+          `${DOCKER} inspect --format='{{.State.Status}}' xhris-bot-${botId}`,
+          { encoding: 'utf8' },
+        ).trim().replace(/'/g, '');
+        if (state === 'running' || state === 'restarting') {
+          appendBotLog(botId, `Log stream reconnecting (container ${state})...`);
+          setTimeout(startStream, 1500);
+          return;
+        }
+        appendBotLog(botId, `Container ${state} (exit ${code ?? 'unknown'})`);
+        onExit?.(code);
+      } catch {
+        onExit?.(code);
       }
     });
   };
 
-  consume('stdout');
-  consume('stderr');
-
-  child.on('error', (err) => {
-    appendBotLog(botId, `Docker log stream failed: ${err.message}`);
-  });
-
-  child.on('close', (code) => {
-    closed = true;
-    appendBotLog(botId, `Docker log stream closed with code ${code ?? 'unknown'}`);
-    onExit?.(code);
-  });
+  startStream();
 
   return () => {
-    if (!closed) child.kill();
+    killed = true;
+    if (currentChild && !currentChild.killed) currentChild.kill();
   };
 }
 

@@ -96,7 +96,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
     let serverId = rawServerId || null;
     if (!serverId) {
       const existingServer = await prisma.server.findFirst({
-        where: { userId: req.user!.id, status: { in: ['ONLINE', 'RUNNING'] as any } },
+        where: { userId: req.user!.id, status: { in: ['ONLINE'] as any } },
         orderBy: { createdAt: 'desc' },
       }).catch(() => null);
       serverId = existingServer?.id || null;
@@ -213,6 +213,32 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
           onExit,
         );
 
+        let installAttempts = 0;
+        const crashLoopDetector = setInterval(() => {
+          try {
+            const logs = readBotLogLines(bot.id, 200);
+            const attempts = logs.filter(l => /Installing system build tools/i.test(l)).length;
+            if (attempts > 2 && installAttempts !== attempts) {
+              installAttempts = attempts;
+              if (attempts >= 3) {
+                clearInterval(crashLoopDetector);
+                appendBotLog(bot.id, 'CRASH LOOP DETECTED: container restarting repeatedly. Stopping.');
+                import('child_process').then(({ execSync }) => {
+                  try { execSync(`docker stop xhris-bot-${bot.id}`, { stdio: 'ignore' }); } catch {}
+                  try { execSync(`docker update --restart=no xhris-bot-${bot.id}`, { stdio: 'ignore' }); } catch {}
+                });
+                prisma.bot.update({
+                  where: { id: bot.id },
+                  data: {
+                    status: 'ERROR',
+                    logs: readBotLogLines(bot.id, 100),
+                  },
+                }).catch(() => {});
+              }
+            }
+          } catch {}
+        }, 15_000);
+
         setTimeout(async () => {
           try {
             const current = await prisma.bot.findUnique({
@@ -233,7 +259,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
             }
 
             if (isAlive) {
-              appendBotLog(bot.id, 'Healthcheck 60s: container alive, marking RUNNING');
+              appendBotLog(bot.id, 'Healthcheck 120s: container alive, marking RUNNING');
               await prisma.bot.update({
                 where: { id: bot.id },
                 data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) },
@@ -247,7 +273,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
                 },
               }).catch(() => {});
             } else {
-              appendBotLog(bot.id, 'Healthcheck 60s: container NOT running, marking ERROR');
+              appendBotLog(bot.id, 'Healthcheck 120s: container NOT running, marking ERROR');
               await prisma.bot.update({
                 where: { id: bot.id },
                 data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
@@ -256,7 +282,7 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
           } catch (e: any) {
             appendBotLog(bot.id, `Healthcheck error: ${e?.message || e}`);
           }
-        }, 60_000);
+        }, 120_000);
       } else {
         const pid = await deployBotNative(bot.id, botPlatform, mergedEnvVars, onReady, onExit);
         processId = pid;
