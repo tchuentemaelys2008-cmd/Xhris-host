@@ -1,271 +1,730 @@
-// ====================================================================
-// PATCH FAPSHI — à remplacer dans backend/src/routes/other.ts
-// ====================================================================
-//
-// INSTRUCTIONS :
-// 1. Va sur GitHub → backend/src/routes/other.ts → éditer
-// 2. Ctrl+F → cherche : "POST /api/payments/fapshi/initiate"
-// 3. Remplace TOUTE la fonction `paymentsRouter.post('/fapshi/initiate', ...)`
-//    (de la ligne `paymentsRouter.post('/fapshi/initiate', ...)` jusqu'à
-//    sa `});` finale, environ 40 lignes) par le bloc 1️⃣ ci-dessous.
-// 4. Ctrl+F → cherche : "POST /api/payments/fapshi/webhook"
-// 5. Remplace TOUTE la fonction `paymentsRouter.post('/fapshi/webhook', ...)`
-//    par le bloc 2️⃣ ci-dessous.
-// 6. Commit.
-// ====================================================================
+import { Router, Response } from 'express';
+import { AuthRequest, authMiddleware } from '../middleware/auth';
+import { prisma } from '../utils/prisma';
+import { sendSuccess, sendError, sendPaginated } from '../utils/response';
+import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
+// ========== DEVELOPER ==========
+export const developerRouter = Router();
 
-// ────────────────────────────────────────────────────────────────────
-// BLOC 1️⃣ — POST /api/payments/fapshi/initiate
-// ────────────────────────────────────────────────────────────────────
-
-// POST /api/payments/fapshi/initiate — Fapshi automatic payment
-paymentsRouter.post('/fapshi/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
+developerRouter.get('/profile', async (req: AuthRequest, res: Response) => {
   try {
-    const { packId, coins, amount, phone } = req.body;
-    if (!packId || !coins || !amount) {
-      return sendError(res, 'Paramètres manquants (packId, coins, amount requis)', 400);
+    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) {
+      profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
     }
+    sendSuccess(res, profile);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
 
-    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
-    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
-      ? 'https://sandbox.fapshi.com'
-      : 'https://live.fapshi.com';
+developerRouter.patch('/profile', async (req: AuthRequest, res: Response) => {
+  try {
+    const { displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic } = req.body;
+    const profile = await prisma.developerProfile.upsert({
+      where: { userId: req.user!.id },
+      create: { userId: req.user!.id, displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic },
+      update: { displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic },
+    });
+    sendSuccess(res, profile, 'Profil mis à jour');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
 
-    // 1 EUR ≈ 655 XAF. Si tu veux un taux à jour, tu peux faire un fetch d'un API forex.
-    const amountXAF = Math.max(100, Math.round(Number(amount) * 655));
+developerRouter.get('/bots', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil développeur non trouvé', 404);
+    const bots = await prisma.marketplaceBot.findMany({ where: { developerId: profile.id }, orderBy: { createdAt: 'desc' } });
+    sendSuccess(res, bots);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+developerRouter.get('/stats', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil non trouvé', 404);
+    const [botsCount, totalDownloads, avgRating] = await Promise.all([
+      prisma.marketplaceBot.count({ where: { developerId: profile.id, status: 'PUBLISHED' } }),
+      prisma.marketplaceBot.aggregate({ where: { developerId: profile.id }, _sum: { downloads: true } }),
+      prisma.marketplaceBot.aggregate({ where: { developerId: profile.id }, _avg: { rating: true } }),
+    ]);
+    sendSuccess(res, { botsPublished: botsCount, totalDownloads: totalDownloads._sum.downloads || 0, avgRating: avgRating._avg.rating || 0 });
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// ─── Multer for bot ZIP uploads ───────────────────────────────────────────────
+const botStorage = multer.diskStorage({
+  destination: (_req: any, _file: any, cb: any) => {
+    const dir = '/tmp/xhris-uploads/bots';
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req: any, file: any, cb: any) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}-${file.originalname}`);
+  },
+});
+const botUpload = multer({
+  storage: botStorage,
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (_req: any, file: any, cb: any) => {
+    if (file.mimetype === 'application/zip' || file.originalname.toLowerCase().endsWith('.zip')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers ZIP sont acceptés'), false);
+    }
+  },
+});
+
+async function notifyAdmins(title: string, message: string, link = '/admin/bots') {
+  try {
+    const admins = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPERADMIN'] } },
+      select: { id: true },
+    });
+    if (admins.length > 0) {
+      await notifyMany(admins.map(a => a.id), { title, message, type: 'INFO', link });
+    }
+  } catch {}
+}
+
+// POST /developer/bots — Submit bot (text)
+developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, platform, tags, version, githubUrl, demoUrl, envTemplate, sessionUrl } = req.body;
+    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
+
+    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
+
+    const bot = await prisma.marketplaceBot.create({
+      data: {
+        name,
+        description,
+        platform: platform.toUpperCase() as any,
+        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
+        version: version || '1.0.0',
+        githubUrl: githubUrl || null,
+        demoUrl: demoUrl || null,
+        sessionUrl: sessionUrl || null,
+        envTemplate: envTemplate || {},
+        status: 'PENDING',
+        developerId: profile.id,
+      },
+    });
+
+    await notifyAdmins('🤖 Nouveau bot en attente', `"${name}" soumis — en attente de validation`);
+    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
+  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
+});
+
+// POST /developer/bots/upload — Submit bot with ZIP
+developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, platform, tags, version, githubUrl, envTemplate, sessionUrl } = req.body;
+    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
+
+    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
+
+    const setupFile = req.file ? `/uploads/bots/${req.file.filename}` : null;
+
+    const bot = await prisma.marketplaceBot.create({
+      data: {
+        name,
+        description,
+        platform: platform.toUpperCase() as any,
+        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
+        version: version || '1.0.0',
+        githubUrl: githubUrl || null,
+        setupFile,
+        sessionUrl: sessionUrl || null,
+        envTemplate: envTemplate ? (typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate) : {},
+        status: 'PENDING',
+        developerId: profile.id,
+      },
+    });
+
+    await notifyAdmins('📦 Nouveau bot ZIP en attente', `"${name}" (avec fichier ZIP) soumis — en attente de validation`);
+    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
+  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
+});
+
+// DELETE /developer/bots/:id
+developerRouter.delete('/bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil développeur non trouvé', 404);
+    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (bot.status === 'PUBLISHED') return sendError(res, 'Impossible de supprimer un bot publié', 400);
+    if (bot.setupFile) {
+      const filePath = path.join('/tmp/xhris-uploads', bot.setupFile.replace('/uploads/', ''));
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    }
+    await prisma.marketplaceBot.delete({ where: { id: bot.id } });
+    sendSuccess(res, null, 'Bot supprimé');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// PATCH /developer/bots/:id
+developerRouter.patch('/bots/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
+    if (!profile) return sendError(res, 'Profil non trouvé', 404);
+    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    const allowed = ['name', 'description', 'longDescription', 'tags', 'version', 'githubUrl', 'demoUrl', 'icon'];
+    const data: any = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
+    const updated = await prisma.marketplaceBot.update({ where: { id: bot.id }, data });
+    sendSuccess(res, updated, 'Bot mis à jour');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// Connector download is served publicly from index.ts before authMiddleware
+
+
+// ========== API KEYS ==========
+export const apiKeysRouter = Router();
+
+apiKeysRouter.get('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const keys = await prisma.apiKey.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
+    // Mask keys
+    const masked = keys.map(k => ({ ...k, key: k.key.slice(0, 12) + '•'.repeat(16) + k.key.slice(-6) }));
+    sendSuccess(res, masked);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+apiKeysRouter.post('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, permissions } = req.body;
+    if (!name) return sendError(res, 'Nom requis', 400);
+    const rawKey = `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
+    const key = await prisma.apiKey.create({
+      data: { userId: req.user!.id, name, key: rawKey, permissions: permissions || ['read'] },
+    });
+    sendSuccess(res, { ...key }, 'Clé créée — sauvegardez-la maintenant, elle ne sera plus affichée', 201);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+apiKeysRouter.post('/:id/revoke', async (req: AuthRequest, res: Response) => {
+  try {
+    const key = await prisma.apiKey.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!key) return sendError(res, 'Clé non trouvée', 404);
+    await prisma.apiKey.update({ where: { id: key.id }, data: { status: 'REVOKED' } });
+    sendSuccess(res, null, 'Clé révoquée');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+apiKeysRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.apiKey.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
+    sendSuccess(res, null, 'Clé supprimée');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// ========== WEBHOOKS ==========
+export const webhooksRouter = Router();
+
+webhooksRouter.get('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const webhooks = await prisma.webhook.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
+    sendSuccess(res, webhooks);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+webhooksRouter.post('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, url, events } = req.body;
+    if (!name || !url || !events?.length) return sendError(res, 'Nom, URL et événements requis', 400);
+    if (!url.startsWith('https://')) return sendError(res, 'URL HTTPS requise', 400);
+    const secret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
+    const webhook = await prisma.webhook.create({
+      data: { userId: req.user!.id, name, url, events, secret },
+    });
+    sendSuccess(res, webhook, 'Webhook créé', 201);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+webhooksRouter.patch('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const wh = await prisma.webhook.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!wh) return sendError(res, 'Webhook non trouvé', 404);
+    const updated = await prisma.webhook.update({ where: { id: wh.id }, data: req.body });
+    sendSuccess(res, updated, 'Webhook mis à jour');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+webhooksRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.webhook.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
+    sendSuccess(res, null, 'Webhook supprimé');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+webhooksRouter.post('/:id/test', async (req: AuthRequest, res: Response) => {
+  try {
+    const wh = await prisma.webhook.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!wh) return sendError(res, 'Webhook non trouvé', 404);
+
+    const payload = { event: 'test', timestamp: new Date().toISOString(), data: { message: 'Test webhook from XHRIS HOST' } };
+    const sig = crypto.createHmac('sha256', wh.secret).update(JSON.stringify(payload)).digest('hex');
+
+    try {
+      const resp = await fetch(wh.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-XHRIS-Signature': `sha256=${sig}` },
+        body: JSON.stringify(payload),
+      });
+      await prisma.webhook.update({ where: { id: wh.id }, data: { lastActivity: new Date(), lastStatus: `${resp.status} ${resp.statusText}` } });
+      sendSuccess(res, { status: resp.status }, `Test envoyé: ${resp.status}`);
+    } catch {
+      sendError(res, 'Impossible de joindre l\'URL', 400);
+    }
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+webhooksRouter.post('/secret/regenerate', async (req: AuthRequest, res: Response) => {
+  try {
+    const newSecret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
+    await prisma.webhook.updateMany({ where: { userId: req.user!.id }, data: { secret: newSecret } });
+    sendSuccess(res, { secret: newSecret }, 'Secret régénéré');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// ========== NOTIFICATIONS ==========
+export const notificationsRouter = Router();
+
+import { sendPushToUser, VAPID_PUBLIC } from '../utils/push';
+import { notify, notifyMany } from '../utils/notify';
+
+notificationsRouter.get('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const unreadOnly = req.query.unread === 'true';
+
+    const where: any = { userId: req.user!.id };
+    if (unreadOnly) where.read = false;
+
+    const [notifications, total] = await Promise.all([
+      prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page-1)*limit, take: limit }),
+      prisma.notification.count({ where }),
+    ]);
+    sendPaginated(res, notifications, total, page, limit);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+notificationsRouter.patch('/:id/read', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.notification.updateMany({ where: { id: req.params.id, userId: req.user!.id }, data: { read: true } });
+    sendSuccess(res, null, 'Notification lue');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+notificationsRouter.post('/read-all', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.notification.updateMany({ where: { userId: req.user!.id, read: false }, data: { read: true } });
+    sendSuccess(res, null, 'Toutes les notifications lues');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+notificationsRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.notification.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
+    sendSuccess(res, null, 'Notification supprimée');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// GET /notifications/push/vapid-key — Public VAPID key for frontend subscription
+notificationsRouter.get('/push/vapid-key', (_req: any, res: Response) => {
+  sendSuccess(res, { key: VAPID_PUBLIC });
+});
+
+// POST /notifications/push/subscribe
+notificationsRouter.post('/push/subscribe', async (req: AuthRequest, res: Response) => {
+  try {
+    const { endpoint, keys, platform } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) return sendError(res, 'Subscription invalide', 400);
+
+    await (prisma as any).pushSubscription.upsert({
+      where: { endpoint },
+      update: { p256dh: keys.p256dh, auth: keys.auth, userId: req.user!.id, platform: platform || 'unknown' },
+      create: { userId: req.user!.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, platform: platform || 'unknown' },
+    });
+
+    sendSuccess(res, null, 'Notifications push activées');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// POST /notifications/push/unsubscribe
+notificationsRouter.post('/push/unsubscribe', async (req: AuthRequest, res: Response) => {
+  try {
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await (prisma as any).pushSubscription.deleteMany({ where: { endpoint, userId: req.user!.id } });
+    }
+    sendSuccess(res, null, 'Notifications push désactivées');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// ========== SUPPORT ==========
+export const supportRouter = Router();
+
+supportRouter.get('/articles', async (req: AuthRequest, res: Response) => {
+  try {
+    const { category, search } = req.query;
+    const where: any = { published: true };
+    if (category) where.category = category;
+    if (search) where.OR = [{ title: { contains: search as string, mode: 'insensitive' } }, { content: { contains: search as string, mode: 'insensitive' } }];
+
+    const articles = await prisma.supportArticle.findMany({ where, orderBy: { views: 'desc' }, take: 20 });
+    sendSuccess(res, articles);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.get('/articles/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const article = await prisma.supportArticle.findUnique({ where: { id: req.params.id } });
+    if (!article) return sendError(res, 'Article non trouvé', 404);
+    await prisma.supportArticle.update({ where: { id: article.id }, data: { views: { increment: 1 } } });
+    sendSuccess(res, article);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.get('/faq', async (_req: AuthRequest, res: Response) => {
+  try {
+    const faq = await prisma.faq.findMany({ where: { active: true }, orderBy: { position: 'asc' } });
+    sendSuccess(res, faq);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.post('/tickets', async (req: AuthRequest, res: Response) => {
+  try {
+    const { subject, message, category, priority } = req.body;
+    if (!subject || !message) return sendError(res, 'Sujet et message requis', 400);
+
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        userId: req.user!.id,
+        subject,
+        category,
+        priority: priority?.toUpperCase() || 'MEDIUM',
+        messages: { create: { senderId: req.user!.id, content: message } },
+      },
+      include: { messages: true },
+    });
+    sendSuccess(res, ticket, 'Ticket créé', 201);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.get('/tickets', async (req: AuthRequest, res: Response) => {
+  try {
+    const tickets = await prisma.supportTicket.findMany({
+      where: { userId: req.user!.id },
+      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      orderBy: { updatedAt: 'desc' },
+    });
+    sendSuccess(res, tickets);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.get('/tickets/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const ticket = await prisma.supportTicket.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!ticket) return sendError(res, 'Ticket non trouvé', 404);
+    sendSuccess(res, ticket);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+supportRouter.post('/tickets/:id/reply', async (req: AuthRequest, res: Response) => {
+  try {
+    const { message } = req.body;
+    const ticket = await prisma.supportTicket.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!ticket) return sendError(res, 'Ticket non trouvé', 404);
+    if (ticket.status === 'CLOSED') return sendError(res, 'Ticket fermé', 400);
+
+    await prisma.$transaction([
+      prisma.ticketMessage.create({ data: { ticketId: ticket.id, senderId: req.user!.id, content: message } }),
+      prisma.supportTicket.update({ where: { id: ticket.id }, data: { status: 'WAITING', updatedAt: new Date() } }),
+    ]);
+    sendSuccess(res, null, 'Réponse envoyée');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+// ========== PAYMENTS ==========
+export const paymentsRouter = Router();
+
+paymentsRouter.post('/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { amount, method, packId } = req.body;
+    if (!amount || !method) return sendError(res, 'Montant et méthode requis', 400);
+
     const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    // URLs de redirection / webhook (DOIVENT être HTTPS et accessibles)
-    const APP_URL = (process.env.FRONTEND_URL || 'https://xhrishost.site').replace(/\/$/, '');
-    const API_URL = (process.env.BACKEND_URL  || 'https://api.xhrishost.site').replace(/\/$/, '');
-
-    const redirectUrl = `${APP_URL}/dashboard/coins/buy?success=1&ref=${reference}`;
-    const webhookUrl  = `${API_URL}/api/payments/fapshi/webhook`;
-
-    // 1. Créer le Payment PENDING en BDD AVANT d'appeler Fapshi
-    await prisma.payment.create({
+    const payment = await prisma.payment.create({
       data: {
         userId: req.user!.id,
         amount,
-        method: 'FAPSHI' as any,
+        method: method.toUpperCase() as any,
         reference,
         packId,
         status: 'PENDING',
       },
     });
 
-    // 2. Sans clés API → mode dev, on renvoie une erreur claire
-    if (!FAPSHI_API_KEY || !FAPSHI_API_USER) {
-      console.error('[Fapshi] Clés API manquantes (FAPSHI_API_KEY / FAPSHI_API_USER)');
-      return sendError(res, 'Paiement Fapshi non configuré côté serveur. Contactez l\'administrateur.', 500);
-    }
+    sendSuccess(res, { payment, reference, paymentUrl: `https://pay.xhris.host/checkout/${reference}` }, 'Paiement initié');
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
 
-    // 3. Construire le payload Fapshi
-    const fapshiPayload: any = {
-      amount: amountXAF,
-      message: `XHRIS Host - ${coins} Coins (${packId})`,
-      externalId: reference,
-      redirectUrl,
-      webhookUrl, // ⬅️ CRUCIAL : sans ça Fapshi ne nous renvoie pas la confirmation
-      email: req.user!.email || undefined,
-      userId: req.user!.id,
-    };
-    if (phone && String(phone).trim()) {
-      fapshiPayload.phone = String(phone).replace(/\s/g, '').replace(/^\+/, '');
-    }
+// POST /api/payments/fapshi/initiate — Fapshi automatic payment
+paymentsRouter.post('/fapshi/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { packId, coins, amount, phone } = req.body;
+    if (!packId || !coins || !amount || !phone) return sendError(res, 'Paramètres manquants', 400);
 
-    // 4. Appel Fapshi
-    let fapshiRes: Response;
-    let rawText: string = '';
-    try {
-      const r = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+    const amountXAF = Math.round(amount * 655);
+    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    // Create pending payment in DB
+    await prisma.payment.create({
+      data: { userId: req.user!.id, amount, method: 'FAPSHI' as any, reference, packId, status: 'PENDING' },
+    });
+
+    // Call Fapshi API if credentials available
+    if (FAPSHI_API_KEY && FAPSHI_API_USER) {
+      const fapshiRes = await fetch('https://live.fapshi.com/initiate-pay', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
           'apiuser': FAPSHI_API_USER,
           'apikey': FAPSHI_API_KEY,
         },
-        body: JSON.stringify(fapshiPayload),
+        body: JSON.stringify({
+          amount: amountXAF,
+          phone: phone.replace(/\s/g, '').replace(/^\+/, ''),
+          message: `XHRIS Host - ${coins} Coins (${packId})`,
+          externalId: reference,
+          redirectUrl: `${process.env.FRONTEND_URL || 'https://xhris-host-frontend.vercel.app'}/dashboard/coins/buy?success=1`,
+        }),
       });
-      rawText = await r.text();
-      fapshiRes = r as any;
-    } catch (e: any) {
-      console.error('[Fapshi] Erreur réseau:', e?.message);
-      await prisma.payment.update({
-        where: { reference }, data: { status: 'FAILED' },
-      }).catch(() => {});
-      return sendError(res, 'Service de paiement Fapshi injoignable. Réessayez.', 502);
+      const fapshiData: any = await fapshiRes.json();
+      if (!fapshiRes.ok) return sendError(res, fapshiData?.message || 'Erreur Fapshi', 400);
+      sendSuccess(res, { reference, link: fapshiData?.link }, 'Paiement Fapshi initié');
+    } else {
+      // No API key — return a placeholder response
+      sendSuccess(res, { reference, link: null }, 'Paiement en attente de configuration Fapshi');
     }
-
-    let fapshiData: any = null;
-    try { fapshiData = rawText ? JSON.parse(rawText) : null; } catch { fapshiData = { raw: rawText }; }
-
-    if (!fapshiRes.ok) {
-      console.error('[Fapshi] Réponse non-OK:', fapshiRes.status, fapshiData);
-      await prisma.payment.update({
-        where: { reference }, data: { status: 'FAILED' },
-      }).catch(() => {});
-      return sendError(
-        res,
-        fapshiData?.message || `Erreur Fapshi (${fapshiRes.status})`,
-        400
-      );
-    }
-
-    const link    = fapshiData?.link;
-    const transId = fapshiData?.transId;
-
-    if (!link) {
-      console.error('[Fapshi] Pas de "link" dans la réponse:', fapshiData);
-      return sendError(res, 'Réponse Fapshi invalide (pas de lien de paiement)', 502);
-    }
-
-    // 5. Sauvegarder transId sur le payment pour retrouver plus tard
-    if (transId) {
-      await prisma.payment.update({
-        where: { reference },
-        data: { externalRef: transId } as any,
-      }).catch(() => {});
-    }
-
-    return sendSuccess(res, {
-      reference,
-      link,
-      paymentUrl: link, // alias pour le front
-      transId: transId || null,
-    }, 'Paiement Fapshi initié');
-  } catch (err: any) {
-    console.error('[Fapshi initiate] erreur:', err?.message);
-    return sendError(res, 'Erreur lors de l\'initiation Fapshi', 500);
-  }
+  } catch (err) { sendError(res, 'Erreur lors de l\'initiation Fapshi', 500); }
 });
 
+// POST /api/payments/geniuspay/initiate — GeniusPay checkout
+paymentsRouter.post('/geniuspay/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { packId, coins, amount, currency = 'XOF', description, successUrl, errorUrl } = req.body;
+    if (!packId || !coins || !amount) return sendError(res, 'Paramètres manquants', 400);
 
-// ────────────────────────────────────────────────────────────────────
-// BLOC 2️⃣ — POST /api/payments/fapshi/webhook
-// ────────────────────────────────────────────────────────────────────
+    const GP_PUBLIC_KEY = process.env.GENIUSPAY_PUBLIC_KEY || '';
+    const GP_SECRET_KEY = process.env.GENIUSPAY_SECRET_KEY || '';
+    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    await prisma.payment.create({
+      data: { userId: req.user!.id, amount, method: 'GENIUSPAY' as any, reference, packId, status: 'PENDING' },
+    });
+
+    if (GP_PUBLIC_KEY && GP_SECRET_KEY) {
+      const gpRes = await fetch('https://pay.genius.ci/api/v1/merchant/payments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': GP_PUBLIC_KEY,
+          'X-API-Secret': GP_SECRET_KEY,
+        },
+        body: JSON.stringify({
+          amount,
+          currency,
+          description: description || `XHRIS Host - ${coins} Coins (${packId})`,
+          customer: { email: req.user!.email },
+          metadata: { order_id: reference, pack_id: packId, coins, user_id: req.user!.id },
+          success_url: successUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?success=1&ref=${reference}`,
+          error_url: errorUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?error=1&ref=${reference}`,
+        }),
+      });
+      const gpData: any = await gpRes.json();
+      if (!gpRes.ok) return sendError(res, gpData?.error?.message || 'Erreur GeniusPay', 400);
+
+      sendSuccess(res, {
+        reference,
+        checkoutUrl: gpData.data?.checkout_url,
+        paymentUrl: gpData.data?.payment_url,
+        gpReference: gpData.data?.reference,
+      }, 'Paiement GeniusPay initié');
+    } else {
+      sendSuccess(res, { reference, checkoutUrl: null }, 'GeniusPay non configuré — mode dev');
+    }
+  } catch (err) { sendError(res, 'Erreur GeniusPay', 500); }
+});
 
 // POST /api/payments/fapshi/webhook — NO AUTH (called by Fapshi)
 paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
   try {
-    const { transId, status, externalId } = req.body || {};
-    console.log('[Fapshi webhook] reçu:', { transId, status, externalId });
+    const { transId, status, externalId } = req.body;
+    if (!externalId) return res.json({ success: true });
 
-    if (!transId && !externalId) {
-      return res.json({ success: true });
-    }
-
-    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
+    const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
     const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
-      ? 'https://sandbox.fapshi.com'
-      : 'https://live.fapshi.com';
 
-    // RE-VERIFIER auprès de Fapshi (anti-spoofing)
     let paymentStatus = status;
-    let verifiedData: any = null;
     if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
       try {
-        const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+        const verifyRes = await fetch(`https://live.fapshi.com/payment-status/${transId}`, {
           headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
         });
-        verifiedData = await verifyRes.json();
-        paymentStatus = verifiedData?.status || status;
-        console.log('[Fapshi webhook] statut vérifié:', paymentStatus);
-      } catch (e: any) {
-        console.error('[Fapshi webhook] échec vérification:', e?.message);
-      }
-    }
-
-    // Notre référence interne (envoyée comme externalId à Fapshi)
-    const ref = externalId || verifiedData?.externalId;
-    if (!ref) {
-      console.error('[Fapshi webhook] pas de référence');
-      return res.json({ success: true });
+        const d: any = await verifyRes.json();
+        paymentStatus = d?.status || status;
+      } catch {}
     }
 
     if (paymentStatus === 'SUCCESSFUL') {
-      const payment = await prisma.payment.findUnique({ where: { reference: ref } });
-      if (!payment) {
-        console.error('[Fapshi webhook] payment introuvable:', ref);
-        return res.json({ success: true });
+      const payment = await prisma.payment.findUnique({ where: { reference: externalId } });
+      if (payment && payment.status === 'PENDING') {
+        const pack = payment.packId
+          ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
+          : null;
+        const coins = pack ? (pack.coins + (pack.bonus || 0)) : Math.floor((payment.amount || 0) * 10);
+        await prisma.$transaction([
+          prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
+          ...(coins > 0 ? [
+            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
+            prisma.transaction.create({
+              data: {
+                userId: payment.userId,
+                type: 'PURCHASE' as any,
+                amount: coins,
+                description: `Achat ${coins} coins via Fapshi Mobile Money`,
+                reference: externalId,
+              },
+            }),
+          ] : []),
+        ]);
+        if (coins > 0) {
+          await notify(payment.userId, {
+            title: '💰 Paiement reçu !',
+            message: `${coins} coins ont été crédités à votre compte.`,
+            type: 'PAYMENT',
+            link: '/dashboard/coins',
+          });
+        }
       }
-
-      // Idempotence : si déjà COMPLETED on ne re-crédite pas
-      if (payment.status === 'COMPLETED') {
-        return res.json({ success: true, alreadyProcessed: true });
-      }
-
-      // Récupérer le pack pour calculer les coins
-      const pack = payment.packId
-        ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
-        : null;
-
-      // Fallback sur les packs hardcodés si la DB ne les a pas
-      const HARDCODED: Record<string, { coins: number; bonus: number }> = {
-        'pack-500':   { coins: 500,   bonus: 0    },
-        'pack-1000':  { coins: 1000,  bonus: 100  },
-        'pack-2500':  { coins: 2500,  bonus: 300  },
-        'pack-5000':  { coins: 5000,  bonus: 700  },
-        'pack-10000': { coins: 10000, bonus: 1500 },
-      };
-      const hc = payment.packId ? HARDCODED[payment.packId] : null;
-
-      const coins = pack
-        ? (pack.coins + (pack.bonus || 0))
-        : hc
-          ? (hc.coins + hc.bonus)
-          : Math.floor((payment.amount || 0) * 10);
-
-      await prisma.$transaction([
-        prisma.payment.update({ where: { reference: ref }, data: { status: 'COMPLETED' } }),
-        ...(coins > 0 ? [
-          prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
-          prisma.transaction.create({
-            data: {
-              userId: payment.userId,
-              type: 'PURCHASE' as any,
-              amount: coins,
-              description: `Achat ${coins} coins via Fapshi Mobile Money`,
-              reference: ref,
-            },
-          }),
-        ] : []),
-      ]);
-
-      if (coins > 0) {
-        await notify(payment.userId, {
-          title: '💰 Paiement reçu !',
-          message: `${coins} coins ont été crédités à votre compte.`,
-          type: 'PAYMENT',
-          link: '/dashboard/coins',
-        }).catch(() => {});
-      }
-
-      console.log('[Fapshi webhook] paiement complété:', ref, `+${coins} coins`);
-    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED' || paymentStatus === 'EXPIRED') {
+    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
       await prisma.payment.updateMany({
-        where: { reference: ref, status: 'PENDING' },
+        where: { reference: externalId, status: 'PENDING' },
         data: { status: 'FAILED' },
       });
-      console.log('[Fapshi webhook] paiement échoué:', ref, paymentStatus);
     }
-    // PENDING / CREATED → on garde tel quel
-
     res.json({ success: true });
-  } catch (e: any) {
-    console.error('[Fapshi webhook] erreur:', e?.message);
-    res.status(500).json({ success: false });
-  }
+  } catch { res.status(500).json({ success: false }); }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Fapshi peut tester le webhook en GET — répondre 200
-// (ajoute aussi cette route au cas où, juste après le POST)
-// ────────────────────────────────────────────────────────────────────
-paymentsRouter.get('/fapshi/webhook', async (_req: any, res: Response) => {
-  res.json({ ok: true, message: 'XHRIS Host Fapshi webhook endpoint' });
+// GET /api/payments/fapshi/verify/:reference
+paymentsRouter.get('/fapshi/verify/:reference', async (req: any, res: Response) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
+    if (!payment) return sendError(res, 'Paiement non trouvé', 404);
+    sendSuccess(res, { status: payment.status, reference: payment.reference, amount: payment.amount, packId: payment.packId });
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+// POST /api/payments/geniuspay/webhook — Receive GeniusPay webhook (no auth)
+paymentsRouter.post('/geniuspay/webhook', async (req: any, res: Response) => {
+  try {
+    const signature = req.headers['x-webhook-signature'] as string;
+    const timestamp = req.headers['x-webhook-timestamp'] as string;
+    const event = req.headers['x-webhook-event'] as string;
+    const webhookSecret = process.env.GENIUSPAY_WEBHOOK_SECRET || '';
+
+    // Verify signature
+    if (webhookSecret && signature && timestamp) {
+      const { createHmac } = await import('crypto');
+      const data = `${timestamp}.${JSON.stringify(req.body)}`;
+      const expected = createHmac('sha256', webhookSecret).update(data).digest('hex');
+      if (expected !== signature) {
+        return res.status(401).json({ success: false, message: 'Signature invalide' });
+      }
+      // Replay attack protection (5 min)
+      if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
+        return res.status(400).json({ success: false, message: 'Timestamp expiré' });
+      }
+    }
+
+    const payload = req.body;
+    const gpRef = payload?.data?.metadata?.order_id as string | undefined;
+
+    if (event === 'payment.success' && gpRef) {
+      const payment = await prisma.payment.findUnique({ where: { reference: gpRef } });
+      if (payment && payment.status === 'PENDING') {
+        const coinsToCredit = Number(payload?.data?.metadata?.coins) || 0;
+        await prisma.$transaction([
+          prisma.payment.update({ where: { reference: gpRef }, data: { status: 'COMPLETED' } }),
+          ...(coinsToCredit > 0 ? [
+            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coinsToCredit } } }),
+            prisma.transaction.create({
+              data: {
+                userId: payment.userId,
+                type: 'PURCHASE' as any,
+                amount: coinsToCredit,
+                description: `Achat ${coinsToCredit} coins via GeniusPay`,
+                reference: gpRef,
+              },
+            }),
+          ] : []),
+        ]);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false }); }
+});
+
+paymentsRouter.get('/verify/:reference', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
+    if (!payment) return sendError(res, 'Paiement non trouvé', 404);
+    sendSuccess(res, payment);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+paymentsRouter.post('/withdraw', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { amount, method, details } = req.body;
+    if (!amount || amount < 10) return sendError(res, 'Montant minimum: €10', 400);
+    if (!method) return sendError(res, 'Méthode requise', 400);
+
+    const fees: Record<string, number> = { CARD: 0.015, PAYPAL: 0.025, CRYPTO: 0.010, BANK_TRANSFER: 0.005 };
+    const fee = amount * (fees[method.toUpperCase()] || 0.015);
+    const net = amount - fee;
+
+    const withdrawal = await prisma.withdrawal.create({
+      data: { userId: req.user!.id, amount, fee, net, method: method.toUpperCase() as any, details: details || {} },
+    });
+
+    sendSuccess(res, withdrawal, 'Demande de retrait soumise', 201);
+  } catch (err) { sendError(res, 'Erreur', 500); }
+});
+
+paymentsRouter.get('/withdrawals', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const withdrawals = await prisma.withdrawal.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
+    sendSuccess(res, withdrawals);
+  } catch (err) { sendError(res, 'Erreur', 500); }
 });
