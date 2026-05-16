@@ -36,6 +36,7 @@ const ALLOWED_ORIGINS = [
 ];
 
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 
 // ─── CORS MANUEL — PREMIER middleware, avant tout ────────────────────────────

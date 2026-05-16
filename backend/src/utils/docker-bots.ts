@@ -65,31 +65,68 @@ export async function deployBotContainer(
     .map(([k, v]) => `-e "${k}=${String(v).replace(/"/g, '\\"')}"`)
     .join(' ');
 
-  const files = fs.readdirSync(sourceDir);
-  const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
-  const entry = candidates.find(e => files.includes(e)) || files.find(f => f.endsWith('.js')) || 'index.js';
-  const hasPackageJson = files.includes('package.json');
-  const packageJson = hasPackageJson ? readPackageJson(path.join(sourceDir, 'package.json')) : null;
-  const hasStartScript = Boolean(packageJson?.scripts?.start);
   const envKeys = Object.keys(envVars)
     .filter(k => !['XHRIS_API_KEY', 'SESSION_ID', 'SESSION', 'SESSIONID', 'SESSION_STRING'].includes(k))
     .sort();
   appendBotLog(botId, `Runtime env keys injected: ${envKeys.join(', ') || 'none'}`);
 
+  // Determine start command — package.json takes priority
+  let startCommand: string;
+  const pkgPath = path.join(sourceDir, 'package.json');
+  const hasPackageJson = fs.existsSync(pkgPath);
+  let packageJson: any = null;
+  if (hasPackageJson) {
+    packageJson = readPackageJson(pkgPath);
+  }
+
+  if (packageJson?.scripts?.start) {
+    // Use npm start — RESPECTS the bot's own entry point (src/index.js, etc.)
+    startCommand = 'npm start';
+    appendBotLog(botId, `Using package.json start script: ${packageJson.scripts.start}`);
+  } else {
+    // Fallback: search candidates at root, EXCLUDING our own connector
+    const files = fs.readdirSync(sourceDir);
+    const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
+    let entry = candidates.find(e => files.includes(e));
+    if (!entry) {
+      // Look in src/ too
+      const srcDir = path.join(sourceDir, 'src');
+      if (fs.existsSync(srcDir)) {
+        const srcFiles = fs.readdirSync(srcDir);
+        const srcEntry = candidates.find(e => srcFiles.includes(e));
+        if (srcEntry) entry = `src/${srcEntry}`;
+      }
+    }
+    if (!entry) {
+      // Last resort — first .js file, EXCLUDING xhrishost-connector.js
+      entry = files.find(f => f.endsWith('.js') && f !== 'xhrishost-connector.js') || 'index.js';
+    }
+    startCommand = `node ${entry}`;
+    appendBotLog(botId, `Using detected entry point: ${entry}`);
+  }
+
+  // Native build tools needed for sharp, bcrypt, sqlite3, etc.
   const startSh = [
     '#!/bin/sh',
     'set -e',
-    hasPackageJson ? 'npm install --omit=dev 2>&1' : '',
-    hasStartScript ? 'exec npm start 2>&1' : `exec node ${entry} 2>&1`,
+    'echo "[XHRIS] Installing system build tools..."',
+    'apk add --no-cache python3 make g++ vips-dev git >/dev/null 2>&1 || true',
+    'if [ -f package.json ]; then',
+    '  echo "[XHRIS] Installing dependencies..."',
+    '  npm install --omit=dev --no-audit --no-fund 2>&1',
+    '  echo "[XHRIS] Dependencies installed."',
+    'fi',
+    'echo "[XHRIS] Starting bot..."',
+    `exec ${startCommand}`,
     '',
-  ].filter(Boolean).join('\n');
+  ].join('\n');
   fs.writeFileSync(path.join(sourceDir, 'start.sh'), startSh);
 
-  appendBotLog(botId, `Creating Docker container with entrypoint ${entry}`);
+  appendBotLog(botId, `Creating Docker container with command ${startCommand}`);
   const createCmd = [
     `${DOCKER} create`,
     `--name ${containerName}`,
-    '--memory=256m --cpus=0.25',
+    '--memory=512m --cpus=0.5',
     '--restart unless-stopped',
     envFlags,
     'node:20-alpine',
@@ -169,7 +206,7 @@ export function followBotContainerLogs(
   onLine: (line: string, stream: 'stdout' | 'stderr') => void,
   onExit?: (code: number | null) => void,
 ): () => void {
-  const child = spawn(DOCKER, ['logs', '-f', `xhris-bot-${botId}`], {
+  const child = spawn(DOCKER, ['logs', '-f', '--tail', 'all', `xhris-bot-${botId}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

@@ -68,29 +68,60 @@ async function deployBotContainer(botId, platform, envVars = {}) {
         .filter(([, v]) => v !== undefined && v !== null)
         .map(([k, v]) => `-e "${k}=${String(v).replace(/"/g, '\\"')}"`)
         .join(' ');
-    const files = fs_1.default.readdirSync(sourceDir);
-    const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
-    const entry = candidates.find(e => files.includes(e)) || files.find(f => f.endsWith('.js')) || 'index.js';
-    const hasPackageJson = files.includes('package.json');
-    const packageJson = hasPackageJson ? readPackageJson(path_1.default.join(sourceDir, 'package.json')) : null;
-    const hasStartScript = Boolean(packageJson?.scripts?.start);
     const envKeys = Object.keys(envVars)
         .filter(k => !['XHRIS_API_KEY', 'SESSION_ID', 'SESSION', 'SESSIONID', 'SESSION_STRING'].includes(k))
         .sort();
     (0, bot_log_files_1.appendBotLog)(botId, `Runtime env keys injected: ${envKeys.join(', ') || 'none'}`);
+    let startCommand;
+    const pkgPath = path_1.default.join(sourceDir, 'package.json');
+    const hasPackageJson = fs_1.default.existsSync(pkgPath);
+    let packageJson = null;
+    if (hasPackageJson) {
+        packageJson = readPackageJson(pkgPath);
+    }
+    if (packageJson?.scripts?.start) {
+        startCommand = 'npm start';
+        (0, bot_log_files_1.appendBotLog)(botId, `Using package.json start script: ${packageJson.scripts.start}`);
+    }
+    else {
+        const files = fs_1.default.readdirSync(sourceDir);
+        const candidates = ['index.js', 'main.js', 'app.js', 'server.js', 'bot.js', 'start.js'];
+        let entry = candidates.find(e => files.includes(e));
+        if (!entry) {
+            const srcDir = path_1.default.join(sourceDir, 'src');
+            if (fs_1.default.existsSync(srcDir)) {
+                const srcFiles = fs_1.default.readdirSync(srcDir);
+                const srcEntry = candidates.find(e => srcFiles.includes(e));
+                if (srcEntry)
+                    entry = `src/${srcEntry}`;
+            }
+        }
+        if (!entry) {
+            entry = files.find(f => f.endsWith('.js') && f !== 'xhrishost-connector.js') || 'index.js';
+        }
+        startCommand = `node ${entry}`;
+        (0, bot_log_files_1.appendBotLog)(botId, `Using detected entry point: ${entry}`);
+    }
     const startSh = [
         '#!/bin/sh',
         'set -e',
-        hasPackageJson ? 'npm install --omit=dev 2>&1' : '',
-        hasStartScript ? 'exec npm start 2>&1' : `exec node ${entry} 2>&1`,
+        'echo "[XHRIS] Installing system build tools..."',
+        'apk add --no-cache python3 make g++ vips-dev git >/dev/null 2>&1 || true',
+        'if [ -f package.json ]; then',
+        '  echo "[XHRIS] Installing dependencies..."',
+        '  npm install --omit=dev --no-audit --no-fund 2>&1',
+        '  echo "[XHRIS] Dependencies installed."',
+        'fi',
+        'echo "[XHRIS] Starting bot..."',
+        `exec ${startCommand}`,
         '',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
     fs_1.default.writeFileSync(path_1.default.join(sourceDir, 'start.sh'), startSh);
-    (0, bot_log_files_1.appendBotLog)(botId, `Creating Docker container with entrypoint ${entry}`);
+    (0, bot_log_files_1.appendBotLog)(botId, `Creating Docker container with command ${startCommand}`);
     const createCmd = [
         `${DOCKER} create`,
         `--name ${containerName}`,
-        '--memory=256m --cpus=0.25',
+        '--memory=512m --cpus=0.5',
         '--restart unless-stopped',
         envFlags,
         'node:20-alpine',
@@ -155,7 +186,7 @@ async function getBotContainerLogs(botId) {
     }
 }
 function followBotContainerLogs(botId, onLine, onExit) {
-    const child = (0, child_process_1.spawn)(DOCKER, ['logs', '-f', `xhris-bot-${botId}`], {
+    const child = (0, child_process_1.spawn)(DOCKER, ['logs', '-f', '--tail', 'all', `xhris-bot-${botId}`], {
         stdio: ['ignore', 'pipe', 'pipe'],
     });
     let closed = false;

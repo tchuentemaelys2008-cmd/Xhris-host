@@ -40,6 +40,7 @@ const ALLOWED_ORIGINS = [
     ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : []),
 ];
 const app = (0, express_1.default)();
+app.set('trust proxy', 1);
 const httpServer = (0, http_1.createServer)(app);
 app.use((req, res, next) => {
     const origin = req.headers.origin;

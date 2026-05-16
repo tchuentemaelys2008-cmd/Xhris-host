@@ -25,7 +25,7 @@ exports.DOCKER_AVAILABLE = (() => {
         return false;
     }
 })();
-const READY_LOG_PATTERN = /(\[WA-CONNECT\]\s*open|whatsapp\s+(connected|connect|open)|bot\s+(connected|connecte|connecté|en ligne)|client\s+(connected|connecte|connecté)|connection\s+open|login successful|connexion\s+whatsapp\s+reussie|connexion\s+whatsapp\s+réussie)/i;
+const READY_LOG_PATTERN = /(\[WA-CONNECT\]\s*open|whatsapp\s+(connected|connect|open|ready)|bot\s+(connected|connecte|connecté|en ligne|ready|started|démarré|demarre|prêt|pret)|client\s+(connected|connecte|connecté|ready)|connection\s+(open|opened|established)|login\s+successful|connexion\s+(whatsapp\s+)?r[eé]ussie|server\s+(running|started|listening)|listening\s+on|démarré\s+sur|started\s+on|✅|connected to|baileys.*open|qr\s*generated|scan\s+the\s+qr|connecté|en\s+ligne)/i;
 function addRuntimeEnvAliases(env) {
     const normalized = { ...env };
     const session = normalized.SESSION_ID || normalized.SESSION || normalized.SESSIONID || normalized.SESSION_STRING;
@@ -204,6 +204,49 @@ router.post('/deploy', async (req, res) => {
                     markedReady = true;
                     await onReady();
                 }, onExit);
+                setTimeout(async () => {
+                    try {
+                        const current = await prisma_1.prisma.bot.findUnique({
+                            where: { id: bot.id },
+                            select: { status: true, userId: true, name: true },
+                        });
+                        if (!current || current.status !== 'STARTING')
+                            return;
+                        let isAlive = false;
+                        try {
+                            const result = (0, child_process_1.execSync)(`docker inspect --format='{{.State.Running}}' xhris-bot-${bot.id}`, { encoding: 'utf8' }).trim().replace(/'/g, '');
+                            isAlive = result === 'true';
+                        }
+                        catch {
+                            isAlive = false;
+                        }
+                        if (isAlive) {
+                            (0, bot_log_files_1.appendBotLog)(bot.id, 'Healthcheck 60s: container alive, marking RUNNING');
+                            await prisma_1.prisma.bot.update({
+                                where: { id: bot.id },
+                                data: { status: 'RUNNING', logs: (0, bot_log_files_1.readBotLogLines)(bot.id, 100) },
+                            }).catch(() => { });
+                            await prisma_1.prisma.notification.create({
+                                data: {
+                                    userId: current.userId,
+                                    title: 'Bot en ligne ! 🎉',
+                                    message: `${current.name} est démarré et fonctionne.`,
+                                    type: 'BOT',
+                                },
+                            }).catch(() => { });
+                        }
+                        else {
+                            (0, bot_log_files_1.appendBotLog)(bot.id, 'Healthcheck 60s: container NOT running, marking ERROR');
+                            await prisma_1.prisma.bot.update({
+                                where: { id: bot.id },
+                                data: { status: 'ERROR', logs: (0, bot_log_files_1.readBotLogLines)(bot.id, 100) },
+                            }).catch(() => { });
+                        }
+                    }
+                    catch (e) {
+                        (0, bot_log_files_1.appendBotLog)(bot.id, `Healthcheck error: ${e?.message || e}`);
+                    }
+                }, 60000);
             }
             else {
                 const pid = await (0, process_runner_1.deployBotNative)(bot.id, botPlatform, mergedEnvVars, onReady, onExit);
