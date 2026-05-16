@@ -1,28 +1,30 @@
 /**
- * XHRIS HOST Connector v2.0
- * Ajoutez ce fichier à votre bot pour le rendre compatible avec XHRIS HOST.
+ * XHRIS HOST Connector v2.1
  *
- * Usage:
- *   const xhris = require('./xhrishost-connector');
- *   // Au démarrage:
- *   await xhris.onBotStart(sock, 'OWNER_JID@s.whatsapp.net');
- *   // Dans le handler de messages:
- *   const handled = await xhris.handleCommand(sock, msg);
- *   if (handled) return;
+ * Nouveautés v2.1 :
+ *  - .id              → affiche votre ID XHRIS (à donner pour recevoir des coins)
+ *  - .transfert <id> <montant> → demande confirmation (1=oui / 2=non) avec
+ *                        nom + email du destinataire avant transfert
+ *  - .hostlink (.host-link, .lien) → renvoie le lien du site
+ *  - Aliases : .transfer, .id, .my-id, .monid
  *
  * Authentification par JID — chaque utilisateur WhatsApp a sa propre session.
- * Aucune clé API n'est partagée dans les messages.
  */
 
 'use strict';
 
-const API_BASE = process.env.XHRIS_API_URL || 'https://api.xhrishost.site/api';
+const API_BASE  = process.env.XHRIS_API_URL || 'https://api.xhrishost.site/api';
+const SITE_URL  = (process.env.XHRIS_SITE_URL || 'https://xhrishost.site').replace(/\/$/, '');
 
 // Per-JID session store: { [jid]: { apiKey, user, connectedAt } }
 const sessions = new Map();
 
 // Pending verification: { [jid]: requestId }
 const awaitingCode = new Map();
+
+// Pending transfer confirmation: { [jid]: { recipient, amount, ts } }
+const awaitingTransferConfirm = new Map();
+const CONFIRM_TIMEOUT_MS = 90 * 1000; // 90s pour répondre 1 ou 2
 
 function getSession(jid) {
   return sessions.get(jid) || null;
@@ -42,7 +44,6 @@ async function apiCall(endpoint, method = 'GET', body = null, apiKey = null) {
 }
 
 async function onBotStart(sock, ownerJid) {
-  // If env key present (server-deployed bot), use it for owner JID automatically
   const envKey = process.env.XHRIS_API_KEY || null;
   if (envKey && ownerJid) {
     const res = await apiCall('/users/me', 'GET', null, envKey);
@@ -64,17 +65,78 @@ async function onBotStart(sock, ownerJid) {
 }
 
 async function handleCommand(sock, msg) {
-  const text =
+  const rawText =
     msg?.message?.conversation ||
     msg?.message?.extendedTextMessage?.text ||
     '';
+  const text = rawText;
+  const trimmed = text.trim();
   const jid = msg.key.remoteJid;
   const session = getSession(jid);
 
+  // ── Confirmation transfert en attente (1 ou 2) ─────────────────────────
+  if (awaitingTransferConfirm.has(jid)) {
+    const pending = awaitingTransferConfirm.get(jid);
+
+    // Timeout dépassé
+    if (Date.now() - pending.ts > CONFIRM_TIMEOUT_MS) {
+      awaitingTransferConfirm.delete(jid);
+      await sock.sendMessage(jid, {
+        text: '⏱️ Délai dépassé. Le transfert a été annulé.\nRelancez avec *.transfert <id> <montant>*',
+      });
+      return true;
+    }
+
+    if (trimmed === '1' || trimmed.toLowerCase() === 'oui' || trimmed.toLowerCase() === 'yes') {
+      awaitingTransferConfirm.delete(jid);
+      if (!session) {
+        await sock.sendMessage(jid, { text: '🔒 Session expirée. Tapez *.xhrishost*.' });
+        return true;
+      }
+      await sock.sendMessage(jid, { text: '🔄 Transfert en cours...' });
+      const res = await apiCall('/coins/transfer', 'POST', {
+        recipientId: pending.recipient.id,
+        amount: pending.amount,
+      }, session.apiKey);
+
+      if (res.success) {
+        await sock.sendMessage(jid, {
+          text:
+            '✅ *Transfert effectué !*\n\n' +
+            '💰 Montant: *' + pending.amount + ' coins*\n' +
+            '👤 Destinataire: *' + pending.recipient.name + '*\n' +
+            '📧 ' + pending.recipient.email + '\n\n' +
+            'Frais: 1 coin\n' +
+            'Tapez *.coins* pour voir votre solde.',
+        });
+      } else {
+        await sock.sendMessage(jid, {
+          text: '❌ ' + (res.message || 'Erreur de transfert'),
+        });
+      }
+      return true;
+    }
+
+    if (trimmed === '2' || trimmed.toLowerCase() === 'non' || trimmed.toLowerCase() === 'no') {
+      awaitingTransferConfirm.delete(jid);
+      await sock.sendMessage(jid, { text: '❌ Transfert annulé.' });
+      return true;
+    }
+
+    // Réponse invalide → on rappelle les options
+    await sock.sendMessage(jid, {
+      text: '❓ Répondez *1* pour confirmer ou *2* pour annuler.\n\n' +
+        '(Demande expirera dans ' +
+        Math.max(0, Math.ceil((CONFIRM_TIMEOUT_MS - (Date.now() - pending.ts)) / 1000)) +
+        's)',
+    });
+    return true;
+  }
+
   // ── Vérification du code (état en attente) ──────────────────────────────────
-  if (awaitingCode.has(jid) && /^\d{6}$/.test(text.trim())) {
+  if (awaitingCode.has(jid) && /^\d{6}$/.test(trimmed)) {
     const requestId = awaitingCode.get(jid);
-    const code = text.trim();
+    const code = trimmed;
     awaitingCode.delete(jid);
 
     await sock.sendMessage(jid, { text: '🔄 Vérification en cours...' });
@@ -100,7 +162,7 @@ async function handleCommand(sock, msg) {
   }
 
   // ── .xhrishost — Démarrer l'authentification ─────────────────────────────
-  if (text.trim() === '.xhrishost') {
+  if (trimmed === '.xhrishost') {
     if (session) {
       await sock.sendMessage(jid, {
         text:
@@ -120,7 +182,6 @@ async function handleCommand(sock, msg) {
 
     awaitingCode.set(jid, res.data.requestId);
 
-    // Auto-cleanup after 3 minutes (code expiry)
     var capturedRequestId = res.data.requestId;
     setTimeout(function() {
       if (awaitingCode.get(jid) === capturedRequestId) {
@@ -141,34 +202,51 @@ async function handleCommand(sock, msg) {
     return true;
   }
 
+  // ── .hostlink / .host-link / .lien — Lien du site (PUBLIC, pas d'auth) ───
+  if (trimmed === '.hostlink' || trimmed === '.host-link' || trimmed === '.lien' || trimmed === '.site') {
+    await sock.sendMessage(jid, {
+      text:
+        '🌐 *XHRIS HOST*\n\n' +
+        '🔗 ' + SITE_URL + '\n\n' +
+        '🤖 Hébergement de bots WhatsApp, Telegram, Discord.\n' +
+        '🚀 Déploiement en 1-clic depuis le Marketplace.\n' +
+        '💰 Tarification flexible avec Coins.\n\n' +
+        'Créez votre compte et déployez votre premier bot en moins de 2 minutes.',
+    });
+    return true;
+  }
+
   // ── .deconnexion ─────────────────────────────────────────────────────────
-  if (text === '.deconnexion') {
+  if (trimmed === '.deconnexion') {
     sessions.delete(jid);
+    awaitingTransferConfirm.delete(jid);
     await sock.sendMessage(jid, { text: '👋 Déconnecté. Tapez *.xhrishost* pour vous reconnecter.' });
     return true;
   }
 
-  // ── .host ─────────────────────────────────────────────────────────────────
-  if (text === '.host') {
+  // ── .host — Menu (auth requise) ──────────────────────────────────────────
+  if (trimmed === '.host') {
     if (!session) {
       await sock.sendMessage(jid, { text: '🔒 Non connecté. Tapez *.xhrishost* pour vous authentifier.' });
       return true;
     }
     await sock.sendMessage(jid, {
       text:
-        '╔══════════════════════╗\n' +
-        '║  🌐 *XHRIS HOST*     ║\n' +
-        '╠══════════════════════╣\n' +
-        '║ .profil  — Profil    ║\n' +
-        '║ .coins   — Solde     ║\n' +
-        '║ .serveurs — Servers  ║\n' +
-        '║ .bots    — Mes bots  ║\n' +
-        '║ .market  — Marketplace║\n' +
-        '║ .historique — Txns   ║\n' +
-        '║ .transfert — Envoyer ║\n' +
-        '║ .acheter  — Acheter  ║\n' +
-        '║ .deconnexion — Quitter║\n' +
-        '╚══════════════════════╝\n\n' +
+        '╔═══════════════════════╗\n' +
+        '║  🌐 *XHRIS HOST*       ║\n' +
+        '╠═══════════════════════╣\n' +
+        '║ .id          — Mon ID  ║\n' +
+        '║ .profil      — Profil   ║\n' +
+        '║ .coins       — Solde    ║\n' +
+        '║ .serveurs    — Servers  ║\n' +
+        '║ .bots        — Mes bots ║\n' +
+        '║ .market      — Market   ║\n' +
+        '║ .historique  — Txns     ║\n' +
+        '║ .transfert   — Envoyer  ║\n' +
+        '║ .acheter     — Acheter  ║\n' +
+        '║ .hostlink    — Site web ║\n' +
+        '║ .deconnexion — Quitter  ║\n' +
+        '╚═══════════════════════╝\n\n' +
         '👤 Connecté: ' + session.user.name,
     });
     return true;
@@ -178,7 +256,22 @@ async function handleCommand(sock, msg) {
   if (!session) return false;
   const key = session.apiKey;
 
-  if (text === '.profil') {
+  // ── .id / .my-id / .monid — Affiche votre ID XHRIS ─────────────────────
+  if (trimmed === '.id' || trimmed === '.my-id' || trimmed === '.monid' || trimmed === '.myid') {
+    await sock.sendMessage(jid, {
+      text:
+        '🆔 *Votre ID XHRIS Host*\n\n' +
+        '```' + session.user.id + '```\n\n' +
+        '📋 Donnez cet ID à un autre utilisateur pour qu\'il vous envoie\n' +
+        'des coins avec la commande :\n' +
+        '*.transfert ' + session.user.id + ' <montant>*\n\n' +
+        '👤 ' + session.user.name + '\n' +
+        '📧 ' + (session.user.email || '—'),
+    });
+    return true;
+  }
+
+  if (trimmed === '.profil') {
     const res = await apiCall('/users/me', 'GET', null, key);
     if (res.success) {
       const u = res.data;
@@ -187,103 +280,207 @@ async function handleCommand(sock, msg) {
           '👤 *Profil XHRIS HOST*\n\n' +
           '📛 Nom: ' + u.name + '\n' +
           '📧 Email: ' + u.email + '\n' +
+          '🆔 ID: ```' + u.id + '```\n' +
           '💰 Coins: ' + u.coins + '\n' +
-          '⭐ Niveau: ' + u.level + ' (' + u.xp + ' XP)\n' +
+          '⭐ Niveau: ' + (u.level || 1) + ' (' + (u.xp || 0) + ' XP)\n' +
           '📦 Plan: ' + u.plan,
       });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text === '.coins') {
+  if (trimmed === '.coins') {
     const res = await apiCall('/coins/balance', 'GET', null, key);
     if (res.success) {
-      await sock.sendMessage(jid, { text: '💰 *Solde:* ' + (res.data.coins || 0) + ' coins' });
+      await sock.sendMessage(jid, {
+        text:
+          '💰 *Solde:* ' + (res.data.coins || 0) + ' coins\n\n' +
+          '📥 Pour recevoir des coins, donnez votre ID :\n' +
+          '*.id*\n' +
+          '📤 Pour en envoyer :\n' +
+          '*.transfert <id> <montant>*',
+      });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text === '.serveurs') {
+  if (trimmed === '.serveurs') {
     const res = await apiCall('/servers', 'GET', null, key);
     if (res.success) {
-      const servers = res.data?.servers || res.data?.data || [];
-      if (!servers.length) { await sock.sendMessage(jid, { text: '📡 Aucun serveur.' }); return true; }
+      const servers = res.data?.servers || res.data?.data || res.data || [];
+      if (!Array.isArray(servers) || !servers.length) {
+        await sock.sendMessage(jid, { text: '📡 Aucun serveur.' });
+        return true;
+      }
       let txt = '📡 *Mes Serveurs*\n\n';
       servers.forEach((s, i) => { txt += (i + 1) + '. *' + s.name + '*\n   ' + s.status + ' | ' + s.plan + '\n\n'; });
       txt += 'Cmds: .start-srv <id> | .stop-srv <id>';
       await sock.sendMessage(jid, { text: txt });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text === '.bots') {
+  if (trimmed === '.bots') {
     const res = await apiCall('/bots', 'GET', null, key);
     if (res.success) {
-      const bots = res.data?.data || res.data || [];
-      if (!bots.length) { await sock.sendMessage(jid, { text: '🤖 Aucun bot déployé.' }); return true; }
+      const bots = res.data?.bots || res.data?.data || res.data || [];
+      if (!Array.isArray(bots) || !bots.length) {
+        await sock.sendMessage(jid, { text: '🤖 Aucun bot déployé.' });
+        return true;
+      }
       let txt = '🤖 *Mes Bots*\n\n';
       bots.forEach((b, i) => { txt += (i + 1) + '. *' + b.name + '* [' + b.status + ']\n   ' + b.platform + '\n\n'; });
       txt += 'Cmds: .start-bot <id> | .stop-bot <id> | .restart-bot <id>';
       await sock.sendMessage(jid, { text: txt });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text === '.market') {
+  if (trimmed === '.market') {
     const res = await apiCall('/marketplace/bots', 'GET', null, key);
     if (res.success) {
-      const bots = res.data?.data || res.data || [];
+      const bots = res.data?.data || res.data?.bots || res.data || [];
       let txt = '🏪 *Marketplace XHRIS HOST*\n\n';
       bots.slice(0, 8).forEach((b, i) => {
-        txt += (i + 1) + '. *' + b.name + '* ⭐' + b.rating + '\n   ' + (b.description || '').slice(0, 40) + '...\n\n';
+        txt += (i + 1) + '. *' + b.name + '* ⭐' + (b.rating || 0) + '\n   ' + (b.description || '').slice(0, 60) + '...\n\n';
       });
+      txt += '🔗 Plus sur ' + SITE_URL + '/marketplace';
       await sock.sendMessage(jid, { text: txt });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text === '.historique') {
+  if (trimmed === '.historique') {
     const res = await apiCall('/coins/transactions?limit=10', 'GET', null, key);
     if (res.success) {
-      const txs = res.data?.transactions || res.data?.data || [];
+      const txs = res.data?.transactions || res.data?.data || res.data || [];
+      if (!Array.isArray(txs) || !txs.length) {
+        await sock.sendMessage(jid, { text: '📜 Aucune transaction.' });
+        return true;
+      }
       let txt = '📜 *Historique (10 dernières)*\n\n';
-      txs.forEach(t => { txt += (t.amount > 0 ? '➕' : '➖') + ' ' + Math.abs(t.amount) + ' — ' + t.description + '\n'; });
+      txs.forEach(t => {
+        const sign = (t.amount > 0) ? '➕' : '➖';
+        txt += sign + ' ' + Math.abs(t.amount) + ' — ' + (t.description || t.type) + '\n';
+      });
       await sock.sendMessage(jid, { text: txt });
+    } else {
+      await sock.sendMessage(jid, { text: '❌ ' + (res.message || 'Erreur') });
     }
     return true;
   }
 
-  if (text.startsWith('.transfert ')) {
-    const parts = text.split(' ');
-    const recipientId = parts[1];
-    const amount = parseInt(parts[2]);
-    if (!recipientId || !amount || amount <= 0) { await sock.sendMessage(jid, { text: '❌ Usage: .transfert <userId> <montant>' }); return true; }
-    const res = await apiCall('/coins/transfer', 'POST', { recipientId, amount }, key);
-    await sock.sendMessage(jid, { text: res.success ? '✅ ' + amount + ' coins envoyés' : '❌ ' + (res.message || 'Erreur') });
-    return true;
-  }
+  // ── .transfert / .transfer <id> <montant> — avec CONFIRMATION ─────────
+  if (trimmed.startsWith('.transfert ') || trimmed.startsWith('.transfer ')) {
+    const parts = trimmed.split(/\s+/);
+    const recipientId = (parts[1] || '').trim();
+    const amount = parseInt(parts[2], 10);
 
-  if (text === '.acheter') {
+    if (!recipientId || !amount || amount <= 0 || Number.isNaN(amount)) {
+      await sock.sendMessage(jid, {
+        text:
+          '❌ *Usage incorrect*\n\n' +
+          'Format : *.transfert <id> <montant>*\n\n' +
+          'Exemple : *.transfert cm1abc23def 100*\n\n' +
+          '💡 Pour avoir votre ID, tapez *.id*',
+      });
+      return true;
+    }
+
+    if (recipientId === session.user.id) {
+      await sock.sendMessage(jid, { text: '❌ Vous ne pouvez pas vous envoyer des coins à vous-même.' });
+      return true;
+    }
+
+    // Récupérer les infos du destinataire pour confirmation
+    await sock.sendMessage(jid, { text: '🔍 Recherche du destinataire...' });
+    const lookup = await apiCall('/coins/lookup/' + encodeURIComponent(recipientId), 'GET', null, key);
+
+    if (!lookup.success) {
+      await sock.sendMessage(jid, {
+        text: '❌ ' + (lookup.message || 'Destinataire introuvable. Vérifiez l\'ID.'),
+      });
+      return true;
+    }
+
+    const recipient = lookup.data;
+    const fee = 1;
+    const total = amount + fee;
+
+    // Stocker la demande en attente
+    awaitingTransferConfirm.set(jid, {
+      recipient: recipient,
+      amount: amount,
+      ts: Date.now(),
+    });
+
+    // Auto-cleanup après timeout
+    setTimeout(() => {
+      const p = awaitingTransferConfirm.get(jid);
+      if (p && p.recipient.id === recipient.id && p.amount === amount) {
+        awaitingTransferConfirm.delete(jid);
+      }
+    }, CONFIRM_TIMEOUT_MS);
+
     await sock.sendMessage(jid, {
       text:
-        '💳 *Acheter des Coins*\n\n' +
-        'Rendez-vous sur:\n🔗 https://xhrishost.site/dashboard/coins/buy\n\n' +
-        'Moyens acceptés:\n• 📱 Mobile Money (Fapshi)\n• 💳 Carte bancaire\n• 🏦 GeniusPay',
+        '⚠️ *Confirmation de transfert*\n\n' +
+        '👤 Destinataire: *' + recipient.name + '*\n' +
+        '📧 Email: ' + (recipient.email || '—') + '\n' +
+        '📦 Plan: ' + (recipient.plan || 'FREE') + '\n\n' +
+        '💰 Montant: *' + amount + ' coins*\n' +
+        '💸 Frais: *' + fee + ' coin*\n' +
+        '━━━━━━━━━━━━━━━━━━\n' +
+        '🧮 Total débité: *' + total + ' coins*\n\n' +
+        '*Répondez :*\n' +
+        '*1* — ✅ Confirmer le transfert\n' +
+        '*2* — ❌ Annuler\n\n' +
+        '⏱️ Vous avez 90 secondes pour répondre.',
     });
     return true;
   }
 
-  if (text.startsWith('.start-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/start', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot démarré' : '❌ ' + res.message }); return true; }
-  if (text.startsWith('.stop-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/stop', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot arrêté' : '❌ ' + res.message }); return true; }
-  if (text.startsWith('.restart-bot ')) { const id = text.split(' ')[1]; const res = await apiCall('/bots/' + id + '/restart', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot redémarré' : '❌ ' + res.message }); return true; }
-  if (text.startsWith('.start-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id + '/start', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur démarré' : '❌ ' + res.message }); return true; }
-  if (text.startsWith('.stop-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id + '/stop', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur arrêté' : '❌ ' + res.message }); return true; }
-  if (text.startsWith('.delete-srv ')) { const id = text.split(' ')[1]; const res = await apiCall('/servers/' + id, 'DELETE', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur supprimé' : '❌ ' + res.message }); return true; }
+  if (trimmed === '.acheter') {
+    await sock.sendMessage(jid, {
+      text:
+        '💳 *Acheter des Coins*\n\n' +
+        'Rendez-vous sur :\n🔗 ' + SITE_URL + '/dashboard/coins/buy\n\n' +
+        '*Packs disponibles :*\n' +
+        '• 500 coins — 1.99€\n' +
+        '• 1 000 coins — 3.49€ (+100 bonus) ⭐\n' +
+        '• 2 500 coins — 7.99€ (+300 bonus)\n' +
+        '• 5 000 coins — 14.99€ (+700 bonus)\n' +
+        '• 10 000 coins — 27.99€ (+1500 bonus)\n\n' +
+        '*Moyens de paiement :*\n' +
+        '• 📱 Mobile Money (Fapshi)\n' +
+        '• 💳 Carte bancaire (GeniusPay)\n' +
+        '• 💸 Virement manuel',
+    });
+    return true;
+  }
+
+  // Bot/server actions
+  if (trimmed.startsWith('.start-bot ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/bots/' + id + '/start', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot démarré' : '❌ ' + (res.message || 'Erreur') }); return true; }
+  if (trimmed.startsWith('.stop-bot ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/bots/' + id + '/stop', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot arrêté' : '❌ ' + (res.message || 'Erreur') }); return true; }
+  if (trimmed.startsWith('.restart-bot ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/bots/' + id + '/restart', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Bot redémarré' : '❌ ' + (res.message || 'Erreur') }); return true; }
+  if (trimmed.startsWith('.start-srv ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/servers/' + id + '/start', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur démarré' : '❌ ' + (res.message || 'Erreur') }); return true; }
+  if (trimmed.startsWith('.stop-srv ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/servers/' + id + '/stop', 'POST', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur arrêté' : '❌ ' + (res.message || 'Erreur') }); return true; }
+  if (trimmed.startsWith('.delete-srv ')) { const id = trimmed.split(/\s+/)[1]; const res = await apiCall('/servers/' + id, 'DELETE', null, key); await sock.sendMessage(jid, { text: res.success ? '✅ Serveur supprimé' : '❌ ' + (res.message || 'Erreur') }); return true; }
 
   return false;
 }
 
-console.log('[XHRIS HOST] ✅ Connector v2.0 chargé — Auth par JID activée');
+console.log('[XHRIS HOST] ✅ Connector v2.1 chargé — Auth par JID activée');
 console.log('[XHRIS HOST] Tapez .xhrishost dans WhatsApp pour démarrer l\'authentification');
 
 module.exports = { handleCommand, apiCall, onBotStart, getSession };
