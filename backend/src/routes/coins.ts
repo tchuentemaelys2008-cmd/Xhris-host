@@ -27,13 +27,14 @@ router.get('/packs', async (_req: AuthRequest, res: Response) => {
       orderBy: { coins: 'asc' },
     });
 
-    // Return defaults if DB empty
+    // Tarifs accessibles — minimum 500 coins
+    // Prix en EUR, ~655 XAF par EUR (donc 1.99€ ≈ 1300 XAF)
     const defaultPacks = [
-      { id: 'pack-100', name: '100 Coins', coins: 100, price: 2.49, currency: 'EUR', label: 'Idéal pour commencer' },
-      { id: 'pack-250', name: '250 Coins', coins: 250, price: 4.99, currency: 'EUR', label: 'Parfait pour les petits projets' },
-      { id: 'pack-500', name: '500 Coins', coins: 500, price: 9.99, currency: 'EUR', popular: true, label: 'Le plus populaire' },
-      { id: 'pack-1000', name: '1,000 Coins', coins: 1000, price: 17.99, currency: 'EUR', label: 'Pour les utilisateurs réguliers' },
-      { id: 'pack-2500', name: '2,500 Coins', coins: 2500, price: 39.99, currency: 'EUR', label: 'Pour les pros' },
+      { id: 'pack-500',  name: '500 Coins',   coins: 500,  price: 1.99,  currency: 'EUR', label: 'Idéal pour démarrer' },
+      { id: 'pack-1000', name: '1,000 Coins', coins: 1000, price: 3.49,  currency: 'EUR', popular: true, label: 'Le plus populaire' },
+      { id: 'pack-2500', name: '2,500 Coins', coins: 2500, price: 7.99,  currency: 'EUR', label: 'Pour les utilisateurs réguliers' },
+      { id: 'pack-5000', name: '5,000 Coins', coins: 5000, price: 14.99, currency: 'EUR', label: 'Pour les pros' },
+      { id: 'pack-10000', name: '10,000 Coins', coins: 10000, price: 27.99, currency: 'EUR', label: 'Maximum value' },
     ];
 
     sendSuccess(res, packs.length > 0 ? packs : defaultPacks);
@@ -53,11 +54,11 @@ router.post('/purchase', async (req: AuthRequest, res: Response) => {
     let pack: any = await (prisma as any).creditPack.findUnique({ where: { id: packId } }).catch(() => null);
     if (!pack) {
       const defaults: Record<string, any> = {
-        'pack-100': { coins: 100, bonus: 0, price: 2.49 },
-        'pack-250': { coins: 250, bonus: 0, price: 4.99 },
-        'pack-500': { coins: 500, bonus: 50, price: 9.99 },
-        'pack-1000': { coins: 1000, bonus: 100, price: 17.99 },
-        'pack-2500': { coins: 2500, bonus: 500, price: 39.99 },
+        'pack-500':   { coins: 500,   bonus: 0,    price: 1.99 },
+        'pack-1000':  { coins: 1000,  bonus: 100,  price: 3.49 },
+        'pack-2500':  { coins: 2500,  bonus: 300,  price: 7.99 },
+        'pack-5000':  { coins: 5000,  bonus: 700,  price: 14.99 },
+        'pack-10000': { coins: 10000, bonus: 1500, price: 27.99 },
       };
       pack = defaults[packId];
     }
@@ -65,7 +66,6 @@ router.post('/purchase', async (req: AuthRequest, res: Response) => {
 
     const reference = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    // Create PENDING payment only — coins are credited by Fapshi/GeniusPay webhook
     await prisma.payment.create({
       data: {
         userId: req.user!.id,
@@ -112,7 +112,6 @@ router.post('/transfer', async (req: AuthRequest, res: Response) => {
       prisma.coinTransfer.create({ data: { senderId: req.user!.id, receiverId: recipientId, amount, fee } }),
     ]);
 
-    // Push + socket notifications outside the transaction
     await Promise.all([
       notify(recipientId, {
         title: '💰 Coins reçus !',
@@ -134,6 +133,26 @@ router.post('/transfer', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/coins/lookup/:userId — Récupère les infos d'un user pour confirmer transfert
+// Renvoie seulement nom + email + plan (pas le solde)
+router.get('/lookup/:userId', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = String(req.params.userId || '').trim();
+    if (!userId) return sendError(res, 'ID requis', 400);
+    if (userId === req.user!.id) return sendError(res, 'C\'est vous-même', 400);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true, plan: true, avatar: true },
+    });
+    if (!user) return sendError(res, 'Utilisateur introuvable', 404);
+
+    sendSuccess(res, user);
+  } catch (err) {
+    sendError(res, 'Erreur', 500);
+  }
+});
+
 // POST /api/coins/daily-bonus
 router.post('/daily-bonus', async (req: AuthRequest, res: Response) => {
   try {
@@ -145,7 +164,7 @@ router.post('/daily-bonus', async (req: AuthRequest, res: Response) => {
     });
     if (existing) return sendError(res, 'Bonus quotidien déjà réclamé', 400);
 
-    const bonusAmount = 3;
+    const bonusAmount = 5; // ⬅️ augmenté de 3 à 5
     await prisma.$transaction([
       prisma.user.update({ where: { id: req.user!.id }, data: { coins: { increment: bonusAmount } } }),
       prisma.transaction.create({ data: { userId: req.user!.id, type: 'DAILY_BONUS', description: 'Récompense quotidienne', amount: bonusAmount } }),
