@@ -24,8 +24,10 @@ export default function BotsPage() {
 
   const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
     running: { label: t('bots.status.running', 'En ligne'), color: 'text-green-400', dot: 'bg-green-500' },
-    stopped: { label: t('bots.status.stopped', 'Arrêté'), color: 'text-red-400', dot: 'bg-red-500' },
-    starting: { label: t('bots.status.starting', 'Démarrage'), color: 'text-yellow-400', dot: 'bg-yellow-500' },
+    online: { label: t('bots.status.running', 'En ligne'), color: 'text-green-400', dot: 'bg-green-500' },
+    stopped: { label: t('bots.status.stopped', 'Arrete'), color: 'text-gray-400', dot: 'bg-gray-500' },
+    starting: { label: t('bots.status.starting', 'Demarrage...'), color: 'text-yellow-400', dot: 'bg-yellow-500' },
+    deploying: { label: t('bots.status.deploying', 'Deploiement...'), color: 'text-blue-400', dot: 'bg-blue-500' },
     error: { label: t('bots.status.error', 'Erreur'), color: 'text-red-400', dot: 'bg-red-500' },
   };
 
@@ -89,7 +91,7 @@ export default function BotsPage() {
   );
 
   const statusKey = (status?: string) => String(status || 'stopped').toLowerCase();
-  const running = bots.filter(b => statusKey(b.status) === 'running').length;
+  const running = bots.filter(b => ['running', 'online'].includes(statusKey(b.status))).length;
   const stopped = bots.filter(b => statusKey(b.status) === 'stopped').length;
   const starting = bots.filter(b => statusKey(b.status) === 'starting').length;
   const totalCoins = bots.reduce((acc, b) => acc + (b.coinsPerDay || b.dailyCost || b.coins || 0), 0);
@@ -183,7 +185,7 @@ export default function BotsPage() {
                     </div>
                     <div className="flex items-center gap-4 mt-1">
                       <div className={`flex items-center gap-1.5 text-xs ${st.color}`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                        {['starting', 'deploying'].includes(normalizedStatus) ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />}
                         {st.label}
                       </div>
                       {bot.uptime && <span className="text-xs text-gray-500">{bot.uptime}</span>}
@@ -193,7 +195,7 @@ export default function BotsPage() {
 
                   {/* Controls */}
                   <div className="flex items-center gap-2">
-                    {normalizedStatus === 'running' ? (
+                    {['running', 'online'].includes(normalizedStatus) ? (
                       <button
                         onClick={() => stopMutation.mutate(bot.id)}
                         disabled={stopMutation.isPending}

@@ -9,6 +9,7 @@ exports.broadcastToAdmins = broadcastToAdmins;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const prisma_1 = require("../utils/prisma");
 const logger_1 = require("../utils/logger");
+const push_1 = require("../utils/push");
 const onlineUsers = new Map();
 function setupWebSockets(io) {
     io.use(async (socket, next) => {
@@ -195,9 +196,14 @@ function setupWebSockets(io) {
 async function sendNotification(io, userId, notification) {
     try {
         const notif = await prisma_1.prisma.notification.create({
-            data: { userId, title: notification.title, message: notification.message, type: (notification.type || 'INFO') },
+            data: { userId, title: notification.title, message: notification.message, type: (notification.type || 'INFO'), link: notification.link },
         });
         io.to(`user:${userId}`).emit('notification:new', notif);
+        (0, push_1.sendPushToUser)(userId, {
+            title: notification.title,
+            body: notification.message,
+            url: notification.link || '/dashboard',
+        }).catch(() => { });
     }
     catch { }
 }

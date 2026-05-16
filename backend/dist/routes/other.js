@@ -28,9 +28,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.paymentsRouter = exports.supportRouter = exports.notificationsRouter = exports.webhooksRouter = exports.apiKeysRouter = exports.developerRouter = void 0;
 const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
 const crypto_1 = __importDefault(require("crypto"));
+const multer_1 = __importDefault(require("multer"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 exports.developerRouter = (0, express_1.Router)();
 exports.developerRouter.get('/profile', async (req, res) => {
     try {
@@ -81,6 +85,146 @@ exports.developerRouter.get('/stats', async (req, res) => {
             prisma_1.prisma.marketplaceBot.aggregate({ where: { developerId: profile.id }, _avg: { rating: true } }),
         ]);
         (0, response_1.sendSuccess)(res, { botsPublished: botsCount, totalDownloads: totalDownloads._sum.downloads || 0, avgRating: avgRating._avg.rating || 0 });
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+const botStorage = multer_1.default.diskStorage({
+    destination: (_req, _file, cb) => {
+        const dir = '/tmp/xhris-uploads/bots';
+        fs_1.default.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+        const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+        cb(null, `${unique}-${file.originalname}`);
+    },
+});
+const botUpload = (0, multer_1.default)({
+    storage: botStorage,
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (file.mimetype === 'application/zip' || file.originalname.toLowerCase().endsWith('.zip')) {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Seuls les fichiers ZIP sont acceptés'), false);
+        }
+    },
+});
+async function notifyAdmins(title, message, link = '/admin/bots') {
+    try {
+        const admins = await prisma_1.prisma.user.findMany({
+            where: { role: { in: ['ADMIN', 'SUPERADMIN'] } },
+            select: { id: true },
+        });
+        if (admins.length > 0) {
+            await (0, notify_1.notifyMany)(admins.map(a => a.id), { title, message, type: 'INFO', link });
+        }
+    }
+    catch { }
+}
+exports.developerRouter.post('/bots', async (req, res) => {
+    try {
+        const { name, description, platform, tags, version, githubUrl, demoUrl, envTemplate, sessionUrl } = req.body;
+        if (!name || !description || !platform)
+            return (0, response_1.sendError)(res, 'Nom, description et plateforme requis', 400);
+        let profile = await prisma_1.prisma.developerProfile.findUnique({ where: { userId: req.user.id } });
+        if (!profile)
+            profile = await prisma_1.prisma.developerProfile.create({ data: { userId: req.user.id } });
+        const bot = await prisma_1.prisma.marketplaceBot.create({
+            data: {
+                name,
+                description,
+                platform: platform.toUpperCase(),
+                tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t) => t.trim()).filter(Boolean) : []),
+                version: version || '1.0.0',
+                githubUrl: githubUrl || null,
+                demoUrl: demoUrl || null,
+                sessionUrl: sessionUrl || null,
+                envTemplate: envTemplate || {},
+                status: 'PENDING',
+                developerId: profile.id,
+            },
+        });
+        await notifyAdmins('🤖 Nouveau bot en attente', `"${name}" soumis — en attente de validation`);
+        (0, response_1.sendSuccess)(res, bot, 'Bot soumis pour validation', 201);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur lors de la soumission', 500);
+    }
+});
+exports.developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req, res) => {
+    try {
+        const { name, description, platform, tags, version, githubUrl, envTemplate, sessionUrl } = req.body;
+        if (!name || !description || !platform)
+            return (0, response_1.sendError)(res, 'Nom, description et plateforme requis', 400);
+        let profile = await prisma_1.prisma.developerProfile.findUnique({ where: { userId: req.user.id } });
+        if (!profile)
+            profile = await prisma_1.prisma.developerProfile.create({ data: { userId: req.user.id } });
+        const setupFile = req.file ? `/uploads/bots/${req.file.filename}` : null;
+        const bot = await prisma_1.prisma.marketplaceBot.create({
+            data: {
+                name,
+                description,
+                platform: platform.toUpperCase(),
+                tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t) => t.trim()).filter(Boolean) : []),
+                version: version || '1.0.0',
+                githubUrl: githubUrl || null,
+                setupFile,
+                sessionUrl: sessionUrl || null,
+                envTemplate: envTemplate ? (typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate) : {},
+                status: 'PENDING',
+                developerId: profile.id,
+            },
+        });
+        await notifyAdmins('📦 Nouveau bot ZIP en attente', `"${name}" (avec fichier ZIP) soumis — en attente de validation`);
+        (0, response_1.sendSuccess)(res, bot, 'Bot soumis pour validation', 201);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur lors de la soumission', 500);
+    }
+});
+exports.developerRouter.delete('/bots/:id', async (req, res) => {
+    try {
+        const profile = await prisma_1.prisma.developerProfile.findUnique({ where: { userId: req.user.id } });
+        if (!profile)
+            return (0, response_1.sendError)(res, 'Profil développeur non trouvé', 404);
+        const bot = await prisma_1.prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        if (bot.status === 'PUBLISHED')
+            return (0, response_1.sendError)(res, 'Impossible de supprimer un bot publié', 400);
+        if (bot.setupFile) {
+            const filePath = path_1.default.join('/tmp/xhris-uploads', bot.setupFile.replace('/uploads/', ''));
+            try {
+                if (fs_1.default.existsSync(filePath))
+                    fs_1.default.unlinkSync(filePath);
+            }
+            catch { }
+        }
+        await prisma_1.prisma.marketplaceBot.delete({ where: { id: bot.id } });
+        (0, response_1.sendSuccess)(res, null, 'Bot supprimé');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.developerRouter.patch('/bots/:id', async (req, res) => {
+    try {
+        const profile = await prisma_1.prisma.developerProfile.findUnique({ where: { userId: req.user.id } });
+        if (!profile)
+            return (0, response_1.sendError)(res, 'Profil non trouvé', 404);
+        const bot = await prisma_1.prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        const allowed = ['name', 'description', 'longDescription', 'tags', 'version', 'githubUrl', 'demoUrl', 'icon'];
+        const data = {};
+        allowed.forEach(k => { if (req.body[k] !== undefined)
+            data[k] = req.body[k]; });
+        const updated = await prisma_1.prisma.marketplaceBot.update({ where: { id: bot.id }, data });
+        (0, response_1.sendSuccess)(res, updated, 'Bot mis à jour');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
@@ -216,6 +360,8 @@ exports.webhooksRouter.post('/secret/regenerate', async (req, res) => {
     }
 });
 exports.notificationsRouter = (0, express_1.Router)();
+const push_1 = require("../utils/push");
+const notify_1 = require("../utils/notify");
 exports.notificationsRouter.get('/', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -247,6 +393,46 @@ exports.notificationsRouter.post('/read-all', async (req, res) => {
     try {
         await prisma_1.prisma.notification.updateMany({ where: { userId: req.user.id, read: false }, data: { read: true } });
         (0, response_1.sendSuccess)(res, null, 'Toutes les notifications lues');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.notificationsRouter.delete('/:id', async (req, res) => {
+    try {
+        await prisma_1.prisma.notification.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
+        (0, response_1.sendSuccess)(res, null, 'Notification supprimée');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.notificationsRouter.get('/push/vapid-key', (_req, res) => {
+    (0, response_1.sendSuccess)(res, { key: push_1.VAPID_PUBLIC });
+});
+exports.notificationsRouter.post('/push/subscribe', async (req, res) => {
+    try {
+        const { endpoint, keys, platform } = req.body;
+        if (!endpoint || !keys?.p256dh || !keys?.auth)
+            return (0, response_1.sendError)(res, 'Subscription invalide', 400);
+        await prisma_1.prisma.pushSubscription.upsert({
+            where: { endpoint },
+            update: { p256dh: keys.p256dh, auth: keys.auth, userId: req.user.id, platform: platform || 'unknown' },
+            create: { userId: req.user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, platform: platform || 'unknown' },
+        });
+        (0, response_1.sendSuccess)(res, null, 'Notifications push activées');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.notificationsRouter.post('/push/unsubscribe', async (req, res) => {
+    try {
+        const { endpoint } = req.body;
+        if (endpoint) {
+            await prisma_1.prisma.pushSubscription.deleteMany({ where: { endpoint, userId: req.user.id } });
+        }
+        (0, response_1.sendSuccess)(res, null, 'Notifications push désactivées');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
@@ -356,7 +542,7 @@ exports.supportRouter.post('/tickets/:id/reply', async (req, res) => {
     }
 });
 exports.paymentsRouter = (0, express_1.Router)();
-exports.paymentsRouter.post('/initiate', async (req, res) => {
+exports.paymentsRouter.post('/initiate', auth_1.authMiddleware, async (req, res) => {
     try {
         const { amount, method, packId } = req.body;
         if (!amount || !method)
@@ -378,7 +564,7 @@ exports.paymentsRouter.post('/initiate', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
-exports.paymentsRouter.post('/fapshi/initiate', async (req, res) => {
+exports.paymentsRouter.post('/fapshi/initiate', auth_1.authMiddleware, async (req, res) => {
     try {
         const { packId, coins, amount, phone } = req.body;
         if (!packId || !coins || !amount || !phone)
@@ -419,7 +605,7 @@ exports.paymentsRouter.post('/fapshi/initiate', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur lors de l\'initiation Fapshi', 500);
     }
 });
-exports.paymentsRouter.post('/geniuspay/initiate', async (req, res) => {
+exports.paymentsRouter.post('/geniuspay/initiate', auth_1.authMiddleware, async (req, res) => {
     try {
         const { packId, coins, amount, currency = 'XOF', description, successUrl, errorUrl } = req.body;
         if (!packId || !coins || !amount)
@@ -464,6 +650,79 @@ exports.paymentsRouter.post('/geniuspay/initiate', async (req, res) => {
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur GeniusPay', 500);
+    }
+});
+exports.paymentsRouter.post('/fapshi/webhook', async (req, res) => {
+    try {
+        const { transId, status, externalId } = req.body;
+        if (!externalId)
+            return res.json({ success: true });
+        const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+        const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+        let paymentStatus = status;
+        if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
+            try {
+                const verifyRes = await fetch(`https://live.fapshi.com/payment-status/${transId}`, {
+                    headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
+                });
+                const d = await verifyRes.json();
+                paymentStatus = d?.status || status;
+            }
+            catch { }
+        }
+        if (paymentStatus === 'SUCCESSFUL') {
+            const payment = await prisma_1.prisma.payment.findUnique({ where: { reference: externalId } });
+            if (payment && payment.status === 'PENDING') {
+                const pack = payment.packId
+                    ? await prisma_1.prisma.creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
+                    : null;
+                const coins = pack ? (pack.coins + (pack.bonus || 0)) : Math.floor((payment.amount || 0) * 10);
+                await prisma_1.prisma.$transaction([
+                    prisma_1.prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
+                    ...(coins > 0 ? [
+                        prisma_1.prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
+                        prisma_1.prisma.transaction.create({
+                            data: {
+                                userId: payment.userId,
+                                type: 'PURCHASE',
+                                amount: coins,
+                                description: `Achat ${coins} coins via Fapshi Mobile Money`,
+                                reference: externalId,
+                            },
+                        }),
+                    ] : []),
+                ]);
+                if (coins > 0) {
+                    await (0, notify_1.notify)(payment.userId, {
+                        title: '💰 Paiement reçu !',
+                        message: `${coins} coins ont été crédités à votre compte.`,
+                        type: 'PAYMENT',
+                        link: '/dashboard/coins',
+                    });
+                }
+            }
+        }
+        else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
+            await prisma_1.prisma.payment.updateMany({
+                where: { reference: externalId, status: 'PENDING' },
+                data: { status: 'FAILED' },
+            });
+        }
+        res.json({ success: true });
+    }
+    catch {
+        res.status(500).json({ success: false });
+    }
+});
+exports.paymentsRouter.get('/fapshi/verify/:reference', async (req, res) => {
+    try {
+        const payment = await prisma_1.prisma.payment.findUnique({ where: { reference: req.params.reference } });
+        if (!payment)
+            return (0, response_1.sendError)(res, 'Paiement non trouvé', 404);
+        (0, response_1.sendSuccess)(res, { status: payment.status, reference: payment.reference, amount: payment.amount, packId: payment.packId });
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
 exports.paymentsRouter.post('/geniuspay/webhook', async (req, res) => {
@@ -512,7 +771,7 @@ exports.paymentsRouter.post('/geniuspay/webhook', async (req, res) => {
         res.status(500).json({ success: false });
     }
 });
-exports.paymentsRouter.get('/verify/:reference', async (req, res) => {
+exports.paymentsRouter.get('/verify/:reference', auth_1.authMiddleware, async (req, res) => {
     try {
         const payment = await prisma_1.prisma.payment.findUnique({ where: { reference: req.params.reference } });
         if (!payment)
@@ -523,7 +782,7 @@ exports.paymentsRouter.get('/verify/:reference', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
-exports.paymentsRouter.post('/withdraw', async (req, res) => {
+exports.paymentsRouter.post('/withdraw', auth_1.authMiddleware, async (req, res) => {
     try {
         const { amount, method, details } = req.body;
         if (!amount || amount < 10)
@@ -542,7 +801,7 @@ exports.paymentsRouter.post('/withdraw', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
-exports.paymentsRouter.get('/withdrawals', async (req, res) => {
+exports.paymentsRouter.get('/withdrawals', auth_1.authMiddleware, async (req, res) => {
     try {
         const withdrawals = await prisma_1.prisma.withdrawal.findMany({ where: { userId: req.user.id }, orderBy: { createdAt: 'desc' } });
         (0, response_1.sendSuccess)(res, withdrawals);

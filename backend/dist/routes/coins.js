@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
+const notify_1 = require("../utils/notify");
 const router = (0, express_1.Router)();
 router.get('/balance', async (req, res) => {
     try {
@@ -40,30 +41,36 @@ router.post('/purchase', async (req, res) => {
         const { packId, method } = req.body;
         if (!packId || !method)
             return (0, response_1.sendError)(res, 'Pack et méthode requis', 400);
-        const defaultPacks = {
-            'pack-100': { coins: 100, price: 2.49 },
-            'pack-250': { coins: 250, price: 4.99 },
-            'pack-500': { coins: 500, price: 9.99 },
-            'pack-1000': { coins: 1000, price: 17.99 },
-            'pack-2500': { coins: 2500, price: 39.99 },
-        };
-        const pack = defaultPacks[packId];
+        let pack = await prisma_1.prisma.creditPack.findUnique({ where: { id: packId } }).catch(() => null);
+        if (!pack) {
+            const defaults = {
+                'pack-100': { coins: 100, bonus: 0, price: 2.49 },
+                'pack-250': { coins: 250, bonus: 0, price: 4.99 },
+                'pack-500': { coins: 500, bonus: 50, price: 9.99 },
+                'pack-1000': { coins: 1000, bonus: 100, price: 17.99 },
+                'pack-2500': { coins: 2500, bonus: 500, price: 39.99 },
+            };
+            pack = defaults[packId];
+        }
         if (!pack)
             return (0, response_1.sendError)(res, 'Pack invalide', 400);
         const reference = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-        await prisma_1.prisma.$transaction([
-            prisma_1.prisma.user.update({ where: { id: req.user.id }, data: { coins: { increment: pack.coins } } }),
-            prisma_1.prisma.transaction.create({
-                data: {
-                    userId: req.user.id,
-                    type: 'PURCHASE',
-                    description: `Achat de ${pack.coins} Coins`,
-                    amount: pack.coins,
-                    reference,
-                },
-            }),
-        ]);
-        (0, response_1.sendSuccess)(res, { coins: pack.coins, reference }, `${pack.coins} Coins ajoutés à votre compte`);
+        await prisma_1.prisma.payment.create({
+            data: {
+                userId: req.user.id,
+                amount: pack.price || pack.coins,
+                method: method.toUpperCase(),
+                reference,
+                packId,
+                status: 'PENDING',
+            },
+        });
+        (0, response_1.sendSuccess)(res, {
+            reference,
+            coins: pack.coins + (pack.bonus || 0),
+            price: pack.price,
+            message: 'Paiement initié. Utilisez /payments/fapshi/initiate pour finaliser.',
+        }, 'Paiement en attente de confirmation');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur lors de l\'achat', 500);
@@ -90,8 +97,20 @@ router.post('/transfer', async (req, res) => {
             prisma_1.prisma.transaction.create({ data: { userId: req.user.id, type: 'TRANSFER_SENT', description: `Envoi à @${recipient.name}`, amount: -amount } }),
             prisma_1.prisma.transaction.create({ data: { userId: recipientId, type: 'TRANSFER_RECEIVED', description: `Reçu de @${sender.name || 'Utilisateur'}`, amount } }),
             prisma_1.prisma.coinTransfer.create({ data: { senderId: req.user.id, receiverId: recipientId, amount, fee } }),
-            prisma_1.prisma.notification.create({ data: { userId: recipientId, title: 'Coins reçus !', message: `Vous avez reçu ${amount} Coins de @${sender.name || 'Utilisateur'}.`, type: 'SUCCESS' } }),
-            prisma_1.prisma.notification.create({ data: { userId: req.user.id, title: 'Transfert effectué', message: `Votre solde a été réduit de ${total} Coins (${amount} envoyés + ${fee} de frais) à @${recipient.name}.`, type: 'INFO' } }),
+        ]);
+        await Promise.all([
+            (0, notify_1.notify)(recipientId, {
+                title: '💰 Coins reçus !',
+                message: `Vous avez reçu ${amount} Coins de @${sender.name || 'Utilisateur'}.`,
+                type: 'SUCCESS',
+                link: '/dashboard/coins',
+            }),
+            (0, notify_1.notify)(req.user.id, {
+                title: '📤 Transfert effectué',
+                message: `${total} Coins envoyés (${amount} + ${fee} frais) à @${recipient.name}.`,
+                type: 'INFO',
+                link: '/dashboard/coins',
+            }),
         ]);
         (0, response_1.sendSuccess)(res, { amount, recipientName: recipient.name }, `${amount} Coins envoyés avec succès`);
     }

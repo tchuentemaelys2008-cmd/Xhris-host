@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
 const router = (0, express_1.Router)();
@@ -20,14 +21,26 @@ router.get('/bots', async (req, res) => {
                 { description: { contains: search, mode: 'insensitive' } },
             ];
         const orderBy = sort === 'rating' ? { rating: 'desc' } : sort === 'newest' ? { createdAt: 'desc' } : { downloads: 'desc' };
-        const [bots, total] = await Promise.all([
+        const [bots, total, activeDevelopers] = await Promise.all([
             prisma_1.prisma.marketplaceBot.findMany({
                 where, orderBy, skip: (page - 1) * limit, take: limit,
                 include: { developer: { select: { displayName: true, verified: true } } },
             }),
             prisma_1.prisma.marketplaceBot.count({ where }),
+            prisma_1.prisma.developerProfile.count({ where: { bots: { some: { status: 'PUBLISHED' } } } }),
         ]);
-        (0, response_1.sendPaginated)(res, bots, total, page, limit);
+        res.json({
+            success: true,
+            data: {
+                bots,
+                stats: {
+                    totalBots: total,
+                    totalDeploys: bots.reduce((sum, bot) => sum + (bot.downloads || 0), 0),
+                    activeDevelopers,
+                },
+                pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+            },
+        });
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
@@ -63,7 +76,7 @@ router.get('/categories', async (_req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
-router.post('/bots/:id/reviews', async (req, res) => {
+router.post('/bots/:id/reviews', auth_1.authMiddleware, async (req, res) => {
     try {
         const { rating, comment } = req.body;
         if (!rating || rating < 1 || rating > 5)

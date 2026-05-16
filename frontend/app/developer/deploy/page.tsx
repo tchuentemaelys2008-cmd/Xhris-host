@@ -240,7 +240,7 @@ export default function DeployBotPage() {
 
       if (!res.ok || !payload.success) {
         const msg = payload.message || 'Le bot n\'a pas pu demarrer';
-        addLog(`Erreur: ${msg}`);
+        addLog(`ERREUR DEPLOIEMENT: ${msg}`);
         setDeployError(msg);
         toast.error(msg);
         setDeploying(false);
@@ -660,7 +660,7 @@ export default function DeployBotPage() {
                       <div className="flex gap-3 pt-1">
                         <button onClick={() => setCurrentStep(2)} className="btn-secondary flex-1">← Retour</button>
                         <button
-                          onClick={handleDeploy}
+                          onClick={() => setCurrentStep(2)}
                           className="btn-primary flex-1 flex items-center justify-center gap-2"
                         >
                           <Zap className="w-4 h-4" /> Réessayer

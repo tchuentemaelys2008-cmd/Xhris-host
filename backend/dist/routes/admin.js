@@ -8,6 +8,8 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const auth_1 = require("../middleware/auth");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
+const notify_1 = require("../utils/notify");
+const email_1 = require("../utils/email");
 const router = (0, express_1.Router)();
 router.use(auth_1.adminMiddleware);
 router.get('/stats', async (_req, res) => {
@@ -666,11 +668,16 @@ router.get('/security/logs', async (req, res) => {
 router.post('/bots/:id/review', async (req, res) => {
     try {
         const { status, reason } = req.body;
+        const statusMap = {
+            approved: 'PUBLISHED', APPROVED: 'PUBLISHED', PUBLISHED: 'PUBLISHED',
+            rejected: 'REJECTED', REJECTED: 'REJECTED',
+        };
+        const mapped = statusMap[status] || status.toUpperCase();
         await prisma_1.prisma.marketplaceBot.update({
             where: { id: req.params.id },
-            data: { status: status.toUpperCase() },
+            data: { status: mapped },
         });
-        (0, response_1.sendSuccess)(res, null, `Bot ${status === 'approved' ? 'approuvé' : 'rejeté'}`);
+        (0, response_1.sendSuccess)(res, null, `Bot ${mapped === 'PUBLISHED' ? 'approuvé' : 'rejeté'}`);
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
@@ -718,6 +725,144 @@ router.post('/messages/:id/reply', async (req, res) => {
             prisma_1.prisma.supportTicket.update({ where: { id: req.params.id }, data: { status: 'IN_PROGRESS', updatedAt: new Date() } }),
         ]);
         (0, response_1.sendSuccess)(res, null, 'Réponse envoyée');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.get('/marketplace-bots', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const status = req.query.status;
+        const platform = req.query.platform;
+        const where = {};
+        if (status)
+            where.status = status.toUpperCase();
+        if (platform)
+            where.platform = platform.toUpperCase();
+        const [bots, total] = await Promise.all([
+            prisma_1.prisma.marketplaceBot.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+                include: {
+                    developer: {
+                        include: {
+                            user: { select: { id: true, name: true, email: true, avatar: true } },
+                        },
+                    },
+                },
+            }),
+            prisma_1.prisma.marketplaceBot.count({ where }),
+        ]);
+        (0, response_1.sendPaginated)(res, bots, total, page, limit);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.get('/marketplace-bots/:id', async (req, res) => {
+    try {
+        const bot = await prisma_1.prisma.marketplaceBot.findUnique({
+            where: { id: req.params.id },
+            include: {
+                developer: {
+                    include: {
+                        user: { select: { id: true, name: true, email: true, avatar: true } },
+                    },
+                },
+            },
+        });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        (0, response_1.sendSuccess)(res, bot);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.patch('/marketplace-bots/:id', async (req, res) => {
+    try {
+        const { sessionUrl, githubUrl, demoUrl, envTemplate, coinsPerDay } = req.body;
+        const bot = await prisma_1.prisma.marketplaceBot.findUnique({ where: { id: req.params.id } });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        const updated = await prisma_1.prisma.marketplaceBot.update({
+            where: { id: bot.id },
+            data: {
+                ...(sessionUrl !== undefined && { sessionUrl: sessionUrl || null }),
+                ...(githubUrl !== undefined && { githubUrl: githubUrl || null }),
+                ...(demoUrl !== undefined && { demoUrl: demoUrl || null }),
+                ...(coinsPerDay !== undefined && { coinsPerDay: Number(coinsPerDay) }),
+                ...(envTemplate !== undefined && { envTemplate: typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate }),
+            },
+        });
+        (0, response_1.sendSuccess)(res, updated, 'Bot mis à jour');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur lors de la mise à jour', 500);
+    }
+});
+router.post('/marketplace-bots/:id/review', async (req, res) => {
+    try {
+        const { status, reason } = req.body;
+        if (!status || !['PUBLISHED', 'REJECTED'].includes(status.toUpperCase())) {
+            return (0, response_1.sendError)(res, 'Status invalide (PUBLISHED ou REJECTED)', 400);
+        }
+        const newStatus = status.toUpperCase();
+        const bot = await prisma_1.prisma.marketplaceBot.findUnique({
+            where: { id: req.params.id },
+            include: {
+                developer: {
+                    include: { user: { select: { id: true, name: true, email: true } } },
+                },
+            },
+        });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        await prisma_1.prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: newStatus } });
+        const devUser = bot.developer.user;
+        await (0, notify_1.notify)(devUser.id, {
+            title: newStatus === 'PUBLISHED' ? '✅ Bot approuvé !' : '❌ Bot rejeté',
+            message: newStatus === 'PUBLISHED'
+                ? `Votre bot "${bot.name}" est maintenant publié sur le marketplace !`
+                : `Votre bot "${bot.name}" a été rejeté.${reason ? ` Raison: ${reason}` : ''}`,
+            type: newStatus === 'PUBLISHED' ? 'SUCCESS' : 'WARNING',
+            link: '/developer/publications',
+        });
+        (0, email_1.sendBotReviewEmail)(devUser.email, devUser.name, bot.name, newStatus, reason).catch(() => { });
+        (0, response_1.sendSuccess)(res, null, newStatus === 'PUBLISHED' ? 'Bot approuvé et publié' : 'Bot rejeté');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/bots/:id/review', async (req, res) => {
+    req.params.id = req.params.id;
+    const { status, reason } = req.body;
+    if (!status || !['PUBLISHED', 'REJECTED', 'approved', 'rejected'].includes(status)) {
+        return (0, response_1.sendError)(res, 'Status invalide', 400);
+    }
+    const mapped = status === 'approved' ? 'PUBLISHED' : status === 'rejected' ? 'REJECTED' : status.toUpperCase();
+    try {
+        const bot = await prisma_1.prisma.marketplaceBot.findUnique({
+            where: { id: req.params.id },
+            include: { developer: { include: { user: { select: { id: true } } } } },
+        });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouvé', 404);
+        await prisma_1.prisma.marketplaceBot.update({ where: { id: bot.id }, data: { status: mapped } });
+        if (bot.developer?.user?.id) {
+            await (0, notify_1.notify)(bot.developer.user.id, {
+                title: mapped === 'PUBLISHED' ? '✅ Bot approuvé' : '❌ Bot rejeté',
+                message: mapped === 'PUBLISHED' ? `"${bot.name}" est publié sur le marketplace` : `"${bot.name}" a été rejeté${reason ? `: ${reason}` : ''}`,
+                type: mapped === 'PUBLISHED' ? 'SUCCESS' : 'WARNING',
+                link: '/developer/publications',
+            });
+        }
+        (0, response_1.sendSuccess)(res, null, 'Review soumise');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);

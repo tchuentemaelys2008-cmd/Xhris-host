@@ -7,6 +7,7 @@ exports.sendOtpEmail = sendOtpEmail;
 exports.sendDeploymentConfirmationEmail = sendDeploymentConfirmationEmail;
 exports.sendServerNotificationEmail = sendServerNotificationEmail;
 exports.sendSubscriptionInvoiceEmail = sendSubscriptionInvoiceEmail;
+exports.sendBotReviewEmail = sendBotReviewEmail;
 exports.sendServerExpirationAlertEmail = sendServerExpirationAlertEmail;
 const logger_1 = require("./logger");
 const FROM = 'XHRIS HOST <noreply@xhris.host>';
@@ -127,6 +128,21 @@ async function sendSubscriptionInvoiceEmail(to, name, plan, amount, period) {
       </div>
     </div>` +
         btn(`${process.env.FRONTEND_URL}/dashboard`, 'Voir mon compte')));
+}
+async function sendBotReviewEmail(to, name, botName, status, reason) {
+    const approved = status === 'PUBLISHED';
+    await sendEmail(to, approved ? `✅ Bot approuvé : ${botName} — XHRIS HOST` : `❌ Bot rejeté : ${botName} — XHRIS HOST`, baseTemplate(approved ? 'Félicitations ! Votre bot est publié' : 'Votre bot a été rejeté', para(`Bonjour ${name},`) +
+        (approved
+            ? para(`Bonne nouvelle ! Votre bot <strong style="color:#fff;">${botName}</strong> a été approuvé et est maintenant disponible sur le marketplace.`)
+            : para(`Votre bot <strong style="color:#fff;">${botName}</strong> n'a pas été accepté pour le moment.`)) +
+        (reason
+            ? `<div style="background:#1a1a2e;border-left:3px solid ${approved ? '#22c55e' : '#ef4444'};padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;">
+            <p style="color:${approved ? '#86efac' : '#fca5a5'};margin:0;font-size:14px;">${reason}</p>
+          </div>`
+            : '') +
+        (approved
+            ? btn(`${process.env.FRONTEND_URL}/marketplace`, 'Voir sur le marketplace')
+            : btn(`${process.env.FRONTEND_URL}/developer/publications`, 'Modifier et resoumettre'))));
 }
 async function sendServerExpirationAlertEmail(to, name, serverName, daysLeft) {
     const isUrgent = daysLeft <= 3;

@@ -1,4 +1,27 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -225,6 +248,106 @@ router.get('/me', auth_1.authMiddleware, async (req, res) => {
 router.post('/logout', auth_1.authMiddleware, async (req, res) => {
     try {
         (0, response_1.sendSuccess)(res, null, 'Déconnexion réussie');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/whatsapp/request', async (req, res) => {
+    try {
+        const { whatsappJid } = req.body;
+        if (!whatsappJid)
+            return (0, response_1.sendError)(res, 'WhatsApp JID requis', 400);
+        const oneMinuteAgo = new Date(Date.now() - 60000);
+        const recent = await prisma_1.prisma.whatsAppVerification.findFirst({
+            where: { whatsappJid, createdAt: { gte: oneMinuteAgo } },
+        });
+        if (recent)
+            return (0, response_1.sendError)(res, 'Attendez 1 minute avant de demander un nouveau code', 429);
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const { randomUUID } = await Promise.resolve().then(() => __importStar(require('crypto')));
+        const requestId = randomUUID();
+        const expiresAt = new Date(Date.now() + 3 * 60000);
+        await prisma_1.prisma.whatsAppVerification.create({
+            data: { requestId, code, whatsappJid, expiresAt },
+        });
+        prisma_1.prisma.whatsAppVerification.deleteMany({ where: { expiresAt: { lt: new Date() } } }).catch(() => { });
+        const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+        (0, response_1.sendSuccess)(res, {
+            requestId,
+            verifyLink: `${frontendUrl}/dashboard?verify=${requestId}`,
+            expiresIn: 180,
+        }, 'Code de vérification créé');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.get('/whatsapp/code/:requestId', auth_1.authMiddleware, async (req, res) => {
+    try {
+        const verification = await prisma_1.prisma.whatsAppVerification.findUnique({
+            where: { requestId: req.params.requestId },
+        });
+        if (!verification)
+            return (0, response_1.sendError)(res, 'Demande non trouvée', 404);
+        if (verification.status !== 'PENDING')
+            return (0, response_1.sendError)(res, 'Code déjà utilisé', 400);
+        if (verification.expiresAt < new Date()) {
+            await prisma_1.prisma.whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+            return (0, response_1.sendError)(res, 'Code expiré', 410);
+        }
+        await prisma_1.prisma.whatsAppVerification.update({
+            where: { id: verification.id },
+            data: { userId: req.user.id },
+        });
+        (0, response_1.sendSuccess)(res, { code: verification.code, expiresAt: verification.expiresAt, whatsappJid: verification.whatsappJid });
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/whatsapp/verify', async (req, res) => {
+    try {
+        const { requestId, code, whatsappJid } = req.body;
+        if (!requestId || !code)
+            return (0, response_1.sendError)(res, 'RequestId et code requis', 400);
+        const verification = await prisma_1.prisma.whatsAppVerification.findUnique({ where: { requestId } });
+        if (!verification)
+            return (0, response_1.sendError)(res, 'Demande non trouvée', 404);
+        if (verification.status !== 'PENDING')
+            return (0, response_1.sendError)(res, 'Code déjà utilisé', 400);
+        if (verification.expiresAt < new Date()) {
+            await prisma_1.prisma.whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+            return (0, response_1.sendError)(res, 'Code expiré — retapez .xhrishost', 410);
+        }
+        if ((verification.attempts || 0) >= 5) {
+            await prisma_1.prisma.whatsAppVerification.update({ where: { id: verification.id }, data: { status: 'EXPIRED' } });
+            return (0, response_1.sendError)(res, 'Trop de tentatives — retapez .xhrishost', 429);
+        }
+        await prisma_1.prisma.whatsAppVerification.update({
+            where: { id: verification.id },
+            data: { attempts: { increment: 1 } },
+        });
+        if (verification.code !== code)
+            return (0, response_1.sendError)(res, 'Code incorrect', 401);
+        if (!verification.userId)
+            return (0, response_1.sendError)(res, 'Ouvrez le lien dans votre navigateur pour valider le code', 400);
+        await prisma_1.prisma.whatsAppVerification.update({
+            where: { id: verification.id },
+            data: { status: 'VERIFIED', whatsappJid: whatsappJid || verification.whatsappJid },
+        });
+        const userId = verification.userId;
+        let apiKey = await prisma_1.prisma.apiKey.findFirst({ where: { userId, status: 'ACTIVE' }, select: { key: true } });
+        if (!apiKey) {
+            const { randomBytes } = await Promise.resolve().then(() => __importStar(require('crypto')));
+            const newKey = `xhs_live_${randomBytes(20).toString('hex')}`;
+            apiKey = await prisma_1.prisma.apiKey.create({
+                data: { userId, name: 'Clé WhatsApp auto', key: newKey, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
+                select: { key: true },
+            });
+        }
+        const user = await prisma_1.prisma.user.findUnique({ where: { id: userId }, select: { name: true, coins: true, plan: true } });
+        (0, response_1.sendSuccess)(res, { apiKey: apiKey.key, user }, 'Connexion WhatsApp réussie');
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);

@@ -17,6 +17,7 @@ const logger_1 = require("./utils/logger");
 const errorHandler_1 = require("./middleware/errorHandler");
 const auth_1 = require("./middleware/auth");
 const websockets_1 = require("./websockets");
+const io_instance_1 = require("./utils/io-instance");
 const auth_2 = __importDefault(require("./routes/auth"));
 const users_1 = __importDefault(require("./routes/users"));
 const bots_1 = __importDefault(require("./routes/bots"));
@@ -92,6 +93,12 @@ app.use('/api/servers', auth_1.authMiddleware, servers_1.default);
 app.use('/api/marketplace', marketplace_1.default);
 app.use('/api/coins', auth_1.authMiddleware, coins_1.default);
 app.use('/api/community', auth_1.authMiddleware, community_1.default);
+app.get('/api/developer/connector/download', (_req, res) => {
+    const filePath = path_1.default.join(__dirname, '../public/xhrishost-connector.js');
+    if (!require('fs').existsSync(filePath))
+        return res.status(404).json({ success: false, message: 'Fichier non trouvé' });
+    res.download(filePath, 'xhrishost-connector.js');
+});
 app.use('/api/developer', auth_1.authMiddleware, developer_1.default);
 app.use('/api/api-keys', auth_1.authMiddleware, apiKeys_1.default);
 app.use('/api/webhooks', auth_1.authMiddleware, webhooks_1.default);
@@ -101,6 +108,7 @@ app.use('/api/payments', payments_1.default);
 app.use('/api/admin', auth_1.authMiddleware, admin_1.default);
 app.use('*', (_, res) => res.status(404).json({ success: false, message: 'Route not found' }));
 app.use(errorHandler_1.errorHandler);
+(0, io_instance_1.setIO)(io);
 (0, websockets_1.setupWebSockets)(io);
 const PORT = parseInt(process.env.PORT || '3001');
 httpServer.listen(PORT, () => {
