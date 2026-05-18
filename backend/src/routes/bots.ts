@@ -14,6 +14,7 @@ import {
 } from '../utils/process-runner';
 import { logger } from '../utils/logger';
 import fs from 'fs';
+import path from 'path';
 import { appendBotLog, ensureBotLogFile, readBotLogLines } from '../utils/bot-log-files';
 import { notify } from '../utils/notify';
 
@@ -129,12 +130,31 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Construire URL API avec /api force (BACKEND_URL peut etre sans /api)
+    const apiBaseRaw = (process.env.BACKEND_URL || 'https://api.xhrishost.site').replace(/\/$/, '');
+    const xhrisApiUrl = apiBaseRaw.endsWith('/api') ? apiBaseRaw : `${apiBaseRaw}/api`;
+
     const mergedEnvVars: Record<string, string> = addRuntimeEnvAliases({
       ...(envVars || {}),
+      // Identite XHRIS
       XHRIS_API_KEY: apiKeyValue,
-      XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
+      XHRIS_API_URL: xhrisApiUrl,
       BOT_NAME: botName,
       XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
+      // Owner immuable (graveé)
+      OWNER_NUMBER: process.env.OWNER_NUMBER || '',
+      // IA conversationnelle
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+      GROK_API_KEY: process.env.GROK_API_KEY || '',
+      // APIs gratuites
+      OMDB_API_KEY: process.env.OMDB_API_KEY || '',
+      AUDD_API_KEY: process.env.AUDD_API_KEY || '',
+      OPENWEATHER_KEY: process.env.OPENWEATHER_KEY || '',
+      // Avance optionnel
+      HF_TOKEN: process.env.HF_TOKEN || '',
+      REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN || '',
     });
 
     if (marketplaceBotId && marketplaceBot) {
@@ -161,6 +181,13 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
         coinsPerDay: deployCost,
       },
     });
+
+    // Injecter BOT_ID dans l'env du bot (necessaire pour .update et autres commandes)
+    mergedEnvVars.BOT_ID = bot.id;
+    await prisma.bot.update({
+      where: { id: bot.id },
+      data: { envVars: mergedEnvVars },
+    }).catch(() => {});
 
     await prisma.$transaction([
       prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: deployCost } } }),
@@ -397,6 +424,104 @@ router.post('/:id/restart', async (req: AuthRequest, res: Response) => {
     }
     sendSuccess(res, null, 'Bot en cours de redémarrage');
   } catch { sendError(res, 'Erreur', 500); }
+});
+
+// POST /api/bots/:id/redeploy - Re-deploie le bot avec les derniers commits du repo
+// Auth: JWT (UI) ou x-api-key (depuis le bot via .update)
+router.post('/:id/redeploy', async (req: AuthRequest, res: Response) => {
+  try {
+    // Auth flexible
+    let userId = req.user?.id;
+    if (!userId) {
+      const apiKey = req.headers['x-api-key'] as string;
+      if (!apiKey) return sendError(res, 'Auth requise (JWT ou x-api-key)', 401);
+      const key = await prisma.apiKey.findFirst({
+        where: { key: apiKey, status: 'ACTIVE' },
+        select: { userId: true },
+      });
+      if (!key) return sendError(res, 'API key invalide', 401);
+      userId = key.userId;
+    }
+
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId } });
+    if (!bot) return sendError(res, 'Bot non trouve', 404);
+
+    await prisma.bot.update({
+      where: { id: bot.id },
+      data: { status: 'STARTING', restarts: { increment: 1 } },
+    });
+
+    // Env vars existantes + BOT_ID garanti
+    const existingEnv = (bot.envVars as Record<string, string>) || {};
+    const mergedEnv = addRuntimeEnvAliases({
+      ...existingEnv,
+      BOT_ID: bot.id,
+    });
+
+    // Cleanup container + workdir
+    if (DOCKER_AVAILABLE) {
+      try { await deleteBotContainer(bot.id); } catch (e: any) {
+        logger.error(`[redeploy ${bot.id}] cleanup container: ${e?.message || 'unknown'}`);
+      }
+    } else {
+      try { await stopBotNative(bot.id); } catch {}
+      try { await deleteBotNative(bot.id); } catch {}
+    }
+
+    try {
+      const workDir = path.join('/tmp/xhris-bots', bot.id);
+      if (fs.existsSync(workDir)) {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      }
+    } catch (e: any) {
+      logger.error(`[redeploy ${bot.id}] cleanup workdir: ${e?.message || 'unknown'}`);
+    }
+
+    // Re-deployer en async (reponse immediate)
+    if (DOCKER_AVAILABLE) {
+      deployBotContainer(bot.id, bot.platform as any, mergedEnv)
+        .then(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } }).catch(() => {});
+        })
+        .catch(async (e: any) => {
+          logger.error(`[redeploy ${bot.id}] failed: ${e?.message || 'unknown'}`);
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => {});
+        });
+    } else {
+      deployBotNative(
+        bot.id,
+        bot.platform as any,
+        mergedEnv,
+        async () => {
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) },
+          }).catch(() => {});
+        },
+        async (code: number) => {
+          if (code === 0) return;
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
+          }).catch(() => {});
+        },
+      )
+        .then(async (pid: number) => {
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { processId: pid, logs: readBotLogLines(bot.id, 50) },
+          }).catch(() => {});
+        })
+        .catch(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => {});
+        });
+    }
+
+    sendSuccess(res, { botId: bot.id }, 'Redeploiement initie - le bot revient dans 2-3 min');
+  } catch (err: any) {
+    logger.error(`[redeploy] error: ${err?.message || 'unknown'}`);
+    sendError(res, 'Erreur lors du redeploiement', 500);
+  }
 });
 
 // DELETE /api/bots/:id
