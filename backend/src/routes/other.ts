@@ -1,843 +1,636 @@
 import { Router, Response } from 'express';
-import { AuthRequest, authMiddleware } from '../middleware/auth';
+import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import crypto from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
-import multer from 'multer';
-import path from 'path';
+import { execSync } from 'child_process';
+import {
+  deployBotContainer, stopBotContainer, startBotContainer,
+  deleteBotContainer, getBotContainerLogs, getBotContainerStats, followBotContainerLogs,
+} from '../utils/docker-bots';
+import {
+  deployBotNative, stopBotNative, startBotNative,
+  deleteBotNative, getBotNativeStats, isRunning,
+} from '../utils/process-runner';
+import { logger } from '../utils/logger';
 import fs from 'fs';
+import path from 'path';
+import { appendBotLog, ensureBotLogFile, readBotLogLines } from '../utils/bot-log-files';
+import { notify } from '../utils/notify';
 
-// ========== DEVELOPER ==========
-export const developerRouter = Router();
-
-developerRouter.get('/profile', async (req: AuthRequest, res: Response) => {
+const router = Router();
+export const DOCKER_AVAILABLE = (() => {
   try {
-    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) {
-      profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
-    }
-    sendSuccess(res, profile);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
+    execSync('docker version', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
-developerRouter.patch('/profile', async (req: AuthRequest, res: Response) => {
-  try {
-    const { displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic } = req.body;
-    const profile = await prisma.developerProfile.upsert({
-      where: { userId: req.user!.id },
-      create: { userId: req.user!.id, displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic },
-      update: { displayName, bio, website, github, twitter, discord, whatsapp, public: isPublic },
-    });
-    sendSuccess(res, profile, 'Profil mis à jour');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
+const READY_LOG_PATTERN = /(\[WA-CONNECT\]\s*open|whatsapp\s+(connected|connect|open|ready)|bot\s+(connected|connecte|connecté|en ligne|ready|started|démarré|demarre|prêt|pret)|client\s+(connected|connecte|connecté|ready)|connection\s+(open|opened|established)|login\s+successful|connexion\s+(whatsapp\s+)?r[eé]ussie|server\s+(running|started|listening)|listening\s+on|démarré\s+sur|started\s+on|✅|connected to|baileys.*open|qr\s*generated|scan\s+the\s+qr|connecté|en\s+ligne)/i;
 
-developerRouter.get('/bots', async (req: AuthRequest, res: Response) => {
-  try {
-    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) return sendError(res, 'Profil développeur non trouvé', 404);
-    const bots = await prisma.marketplaceBot.findMany({ where: { developerId: profile.id }, orderBy: { createdAt: 'desc' } });
-    sendSuccess(res, bots);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
+function addRuntimeEnvAliases(env: Record<string, string>): Record<string, string> {
+  const normalized = { ...env };
+  const session = normalized.SESSION_ID || normalized.SESSION || normalized.SESSIONID || normalized.SESSION_STRING;
+  if (session) {
+    normalized.SESSION_ID = session;
+    normalized.SESSION = normalized.SESSION || session;
+    normalized.SESSIONID = normalized.SESSIONID || session;
+    normalized.SESSION_STRING = normalized.SESSION_STRING || session;
+  }
 
-developerRouter.get('/stats', async (req: AuthRequest, res: Response) => {
-  try {
-    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) return sendError(res, 'Profil non trouvé', 404);
-    const [botsCount, totalDownloads, avgRating] = await Promise.all([
-      prisma.marketplaceBot.count({ where: { developerId: profile.id, status: 'PUBLISHED' } }),
-      prisma.marketplaceBot.aggregate({ where: { developerId: profile.id }, _sum: { downloads: true } }),
-      prisma.marketplaceBot.aggregate({ where: { developerId: profile.id }, _avg: { rating: true } }),
-    ]);
-    sendSuccess(res, { botsPublished: botsCount, totalDownloads: totalDownloads._sum.downloads || 0, avgRating: avgRating._avg.rating || 0 });
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
+  const owner = normalized.OWNER_NUMBER || normalized.OWNER || normalized.OWNER_NUM || normalized.BOT_OWNER || normalized.SUDO;
+  if (owner) {
+    const cleanOwner = String(owner).replace(/^\+/, '');
+    normalized.OWNER_NUMBER = normalized.OWNER_NUMBER || cleanOwner;
+    normalized.OWNER = normalized.OWNER || cleanOwner;
+    normalized.OWNER_NUM = normalized.OWNER_NUM || cleanOwner;
+    normalized.BOT_OWNER = normalized.BOT_OWNER || cleanOwner;
+  }
 
-// ─── Multer for bot ZIP uploads ───────────────────────────────────────────────
-const botStorage = multer.diskStorage({
-  destination: (_req: any, _file: any, cb: any) => {
-    const dir = '/tmp/xhris-uploads/bots';
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req: any, file: any, cb: any) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${unique}-${file.originalname}`);
-  },
-});
-const botUpload = multer({
-  storage: botStorage,
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (_req: any, file: any, cb: any) => {
-    if (file.mimetype === 'application/zip' || file.originalname.toLowerCase().endsWith('.zip')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Seuls les fichiers ZIP sont acceptés'), false);
-    }
-  },
-});
-
-async function notifyAdmins(title: string, message: string, link = '/admin/bots') {
-  try {
-    const admins = await prisma.user.findMany({
-      where: { role: { in: ['ADMIN', 'SUPERADMIN'] } },
-      select: { id: true },
-    });
-    if (admins.length > 0) {
-      await notifyMany(admins.map(a => a.id), { title, message, type: 'INFO', link });
-    }
-  } catch {}
+  if (normalized.PREFIX && !normalized.PREFIXES) normalized.PREFIXES = normalized.PREFIX;
+  return normalized;
 }
 
-// POST /developer/bots — Submit bot (text)
-developerRouter.post('/bots', async (req: AuthRequest, res: Response) => {
-  try {
-    const { name, description, platform, tags, version, githubUrl, demoUrl, envTemplate, sessionUrl } = req.body;
-    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
+function maskEnvVars(envVars: any): any {
+  if (!envVars || typeof envVars !== 'object') return envVars;
+  const safe = { ...envVars };
+  const PROTECTED = ['XHRIS_API_KEY', 'SESSION_SECRET', 'OPENAI_API_KEY'];
+  PROTECTED.forEach(k => {
+    if (safe[k]) safe[k] = '***' + String(safe[k]).slice(-4);
+  });
+  return safe;
+}
 
-    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
-
-    const bot = await prisma.marketplaceBot.create({
-      data: {
-        name,
-        description,
-        platform: platform.toUpperCase() as any,
-        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
-        version: version || '1.0.0',
-        githubUrl: githubUrl || null,
-        demoUrl: demoUrl || null,
-        sessionUrl: sessionUrl || null,
-        envTemplate: envTemplate || {},
-        status: 'PENDING',
-        developerId: profile.id,
-      },
-    });
-
-    await notifyAdmins('🤖 Nouveau bot en attente', `"${name}" soumis — en attente de validation`);
-    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
-  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
-});
-
-// POST /developer/bots/upload — Submit bot with ZIP
-developerRouter.post('/bots/upload', botUpload.single('botZip'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { name, description, platform, tags, version, githubUrl, envTemplate, sessionUrl } = req.body;
-    if (!name || !description || !platform) return sendError(res, 'Nom, description et plateforme requis', 400);
-
-    let profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) profile = await prisma.developerProfile.create({ data: { userId: req.user!.id } });
-
-    const setupFile = req.file ? `/uploads/bots/${req.file.filename}` : null;
-
-    const bot = await prisma.marketplaceBot.create({
-      data: {
-        name,
-        description,
-        platform: platform.toUpperCase() as any,
-        tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map((t: string) => t.trim()).filter(Boolean) : []),
-        version: version || '1.0.0',
-        githubUrl: githubUrl || null,
-        setupFile,
-        sessionUrl: sessionUrl || null,
-        envTemplate: envTemplate ? (typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate) : {},
-        status: 'PENDING',
-        developerId: profile.id,
-      },
-    });
-
-    await notifyAdmins('📦 Nouveau bot ZIP en attente', `"${name}" (avec fichier ZIP) soumis — en attente de validation`);
-    sendSuccess(res, bot, 'Bot soumis pour validation', 201);
-  } catch (err) { sendError(res, 'Erreur lors de la soumission', 500); }
-});
-
-// DELETE /developer/bots/:id
-developerRouter.delete('/bots/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) return sendError(res, 'Profil développeur non trouvé', 404);
-    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
-    if (!bot) return sendError(res, 'Bot non trouvé', 404);
-    if (bot.status === 'PUBLISHED') return sendError(res, 'Impossible de supprimer un bot publié', 400);
-    if (bot.setupFile) {
-      const filePath = path.join('/tmp/xhris-uploads', bot.setupFile.replace('/uploads/', ''));
-      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
-    }
-    await prisma.marketplaceBot.delete({ where: { id: bot.id } });
-    sendSuccess(res, null, 'Bot supprimé');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// PATCH /developer/bots/:id
-developerRouter.patch('/bots/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    const profile = await prisma.developerProfile.findUnique({ where: { userId: req.user!.id } });
-    if (!profile) return sendError(res, 'Profil non trouvé', 404);
-    const bot = await prisma.marketplaceBot.findFirst({ where: { id: req.params.id, developerId: profile.id } });
-    if (!bot) return sendError(res, 'Bot non trouvé', 404);
-    const allowed = ['name', 'description', 'longDescription', 'tags', 'version', 'githubUrl', 'demoUrl', 'icon'];
-    const data: any = {};
-    allowed.forEach(k => { if (req.body[k] !== undefined) data[k] = req.body[k]; });
-    const updated = await prisma.marketplaceBot.update({ where: { id: bot.id }, data });
-    sendSuccess(res, updated, 'Bot mis à jour');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// Connector download is served publicly from index.ts before authMiddleware
-
-
-// ========== API KEYS ==========
-export const apiKeysRouter = Router();
-
-apiKeysRouter.get('/', async (req: AuthRequest, res: Response) => {
-  try {
-    const keys = await prisma.apiKey.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
-    // Mask keys
-    const masked = keys.map(k => ({ ...k, key: k.key.slice(0, 12) + '•'.repeat(16) + k.key.slice(-6) }));
-    sendSuccess(res, masked);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-apiKeysRouter.post('/', async (req: AuthRequest, res: Response) => {
-  try {
-    const { name, permissions } = req.body;
-    if (!name) return sendError(res, 'Nom requis', 400);
-    const rawKey = `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
-    const key = await prisma.apiKey.create({
-      data: { userId: req.user!.id, name, key: rawKey, permissions: permissions || ['read'] },
-    });
-    sendSuccess(res, { ...key }, 'Clé créée — sauvegardez-la maintenant, elle ne sera plus affichée', 201);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-apiKeysRouter.post('/:id/revoke', async (req: AuthRequest, res: Response) => {
-  try {
-    const key = await prisma.apiKey.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
-    if (!key) return sendError(res, 'Clé non trouvée', 404);
-    await prisma.apiKey.update({ where: { id: key.id }, data: { status: 'REVOKED' } });
-    sendSuccess(res, null, 'Clé révoquée');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-apiKeysRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.apiKey.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
-    sendSuccess(res, null, 'Clé supprimée');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// ========== WEBHOOKS ==========
-export const webhooksRouter = Router();
-
-webhooksRouter.get('/', async (req: AuthRequest, res: Response) => {
-  try {
-    const webhooks = await prisma.webhook.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
-    sendSuccess(res, webhooks);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-webhooksRouter.post('/', async (req: AuthRequest, res: Response) => {
-  try {
-    const { name, url, events } = req.body;
-    if (!name || !url || !events?.length) return sendError(res, 'Nom, URL et événements requis', 400);
-    if (!url.startsWith('https://')) return sendError(res, 'URL HTTPS requise', 400);
-    const secret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
-    const webhook = await prisma.webhook.create({
-      data: { userId: req.user!.id, name, url, events, secret },
-    });
-    sendSuccess(res, webhook, 'Webhook créé', 201);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-webhooksRouter.patch('/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    const wh = await prisma.webhook.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
-    if (!wh) return sendError(res, 'Webhook non trouvé', 404);
-    const updated = await prisma.webhook.update({ where: { id: wh.id }, data: req.body });
-    sendSuccess(res, updated, 'Webhook mis à jour');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-webhooksRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.webhook.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
-    sendSuccess(res, null, 'Webhook supprimé');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-webhooksRouter.post('/:id/test', async (req: AuthRequest, res: Response) => {
-  try {
-    const wh = await prisma.webhook.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
-    if (!wh) return sendError(res, 'Webhook non trouvé', 404);
-
-    const payload = { event: 'test', timestamp: new Date().toISOString(), data: { message: 'Test webhook from XHRIS HOST' } };
-    const sig = crypto.createHmac('sha256', wh.secret).update(JSON.stringify(payload)).digest('hex');
-
-    try {
-      const resp = await fetch(wh.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-XHRIS-Signature': `sha256=${sig}` },
-        body: JSON.stringify(payload),
-      });
-      await prisma.webhook.update({ where: { id: wh.id }, data: { lastActivity: new Date(), lastStatus: `${resp.status} ${resp.statusText}` } });
-      sendSuccess(res, { status: resp.status }, `Test envoyé: ${resp.status}`);
-    } catch {
-      sendError(res, 'Impossible de joindre l\'URL', 400);
-    }
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-webhooksRouter.post('/secret/regenerate', async (req: AuthRequest, res: Response) => {
-  try {
-    const newSecret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
-    await prisma.webhook.updateMany({ where: { userId: req.user!.id }, data: { secret: newSecret } });
-    sendSuccess(res, { secret: newSecret }, 'Secret régénéré');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// ========== NOTIFICATIONS ==========
-export const notificationsRouter = Router();
-
-import { sendPushToUser, VAPID_PUBLIC } from '../utils/push';
-import { notify, notifyMany } from '../utils/notify';
-
-notificationsRouter.get('/', async (req: AuthRequest, res: Response) => {
+// GET /api/bots
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
-    const unreadOnly = req.query.unread === 'true';
-
+    const status = req.query.status as string;
     const where: any = { userId: req.user!.id };
-    if (unreadOnly) where.read = false;
-
-    const [notifications, total] = await Promise.all([
-      prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page-1)*limit, take: limit }),
-      prisma.notification.count({ where }),
+    if (status) where.status = status.toUpperCase();
+    const [bots, total] = await Promise.all([
+      prisma.bot.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      prisma.bot.count({ where }),
     ]);
-    sendPaginated(res, notifications, total, page, limit);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-notificationsRouter.patch('/:id/read', async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.notification.updateMany({ where: { id: req.params.id, userId: req.user!.id }, data: { read: true } });
-    sendSuccess(res, null, 'Notification lue');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-notificationsRouter.post('/read-all', async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.notification.updateMany({ where: { userId: req.user!.id, read: false }, data: { read: true } });
-    sendSuccess(res, null, 'Toutes les notifications lues');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-notificationsRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    await prisma.notification.deleteMany({ where: { id: req.params.id, userId: req.user!.id } });
-    sendSuccess(res, null, 'Notification supprimée');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// GET /notifications/push/vapid-key — Public VAPID key for frontend subscription
-notificationsRouter.get('/push/vapid-key', (_req: any, res: Response) => {
-  sendSuccess(res, { key: VAPID_PUBLIC });
-});
-
-// POST /notifications/push/subscribe
-notificationsRouter.post('/push/subscribe', async (req: AuthRequest, res: Response) => {
-  try {
-    const { endpoint, keys, platform } = req.body;
-    if (!endpoint || !keys?.p256dh || !keys?.auth) return sendError(res, 'Subscription invalide', 400);
-
-    await (prisma as any).pushSubscription.upsert({
-      where: { endpoint },
-      update: { p256dh: keys.p256dh, auth: keys.auth, userId: req.user!.id, platform: platform || 'unknown' },
-      create: { userId: req.user!.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, platform: platform || 'unknown' },
-    });
-
-    sendSuccess(res, null, 'Notifications push activées');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// POST /notifications/push/unsubscribe
-notificationsRouter.post('/push/unsubscribe', async (req: AuthRequest, res: Response) => {
-  try {
-    const { endpoint } = req.body;
-    if (endpoint) {
-      await (prisma as any).pushSubscription.deleteMany({ where: { endpoint, userId: req.user!.id } });
-    }
-    sendSuccess(res, null, 'Notifications push désactivées');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// ========== SUPPORT ==========
-export const supportRouter = Router();
-
-supportRouter.get('/articles', async (req: AuthRequest, res: Response) => {
-  try {
-    const { category, search } = req.query;
-    const where: any = { published: true };
-    if (category) where.category = category;
-    if (search) where.OR = [{ title: { contains: search as string, mode: 'insensitive' } }, { content: { contains: search as string, mode: 'insensitive' } }];
-
-    const articles = await prisma.supportArticle.findMany({ where, orderBy: { views: 'desc' }, take: 20 });
-    sendSuccess(res, articles);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.get('/articles/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    const article = await prisma.supportArticle.findUnique({ where: { id: req.params.id } });
-    if (!article) return sendError(res, 'Article non trouvé', 404);
-    await prisma.supportArticle.update({ where: { id: article.id }, data: { views: { increment: 1 } } });
-    sendSuccess(res, article);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.get('/faq', async (_req: AuthRequest, res: Response) => {
-  try {
-    const faq = await prisma.faq.findMany({ where: { active: true }, orderBy: { position: 'asc' } });
-    sendSuccess(res, faq);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.post('/tickets', async (req: AuthRequest, res: Response) => {
-  try {
-    const { subject, message, category, priority } = req.body;
-    if (!subject || !message) return sendError(res, 'Sujet et message requis', 400);
-
-    const ticket = await prisma.supportTicket.create({
-      data: {
-        userId: req.user!.id,
-        subject,
-        category,
-        priority: priority?.toUpperCase() || 'MEDIUM',
-        messages: { create: { senderId: req.user!.id, content: message } },
-      },
-      include: { messages: true },
-    });
-    sendSuccess(res, ticket, 'Ticket créé', 201);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.get('/tickets', async (req: AuthRequest, res: Response) => {
-  try {
-    const tickets = await prisma.supportTicket.findMany({
-      where: { userId: req.user!.id },
-      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
-      orderBy: { updatedAt: 'desc' },
-    });
-    sendSuccess(res, tickets);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.get('/tickets/:id', async (req: AuthRequest, res: Response) => {
-  try {
-    const ticket = await prisma.supportTicket.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
-      include: { messages: { orderBy: { createdAt: 'asc' } } },
-    });
-    if (!ticket) return sendError(res, 'Ticket non trouvé', 404);
-    sendSuccess(res, ticket);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-supportRouter.post('/tickets/:id/reply', async (req: AuthRequest, res: Response) => {
-  try {
-    const { message } = req.body;
-    const ticket = await prisma.supportTicket.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
-    if (!ticket) return sendError(res, 'Ticket non trouvé', 404);
-    if (ticket.status === 'CLOSED') return sendError(res, 'Ticket fermé', 400);
-
-    await prisma.$transaction([
-      prisma.ticketMessage.create({ data: { ticketId: ticket.id, senderId: req.user!.id, content: message } }),
-      prisma.supportTicket.update({ where: { id: ticket.id }, data: { status: 'WAITING', updatedAt: new Date() } }),
-    ]);
-    sendSuccess(res, null, 'Réponse envoyée');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// ========== PAYMENTS ==========
-export const paymentsRouter = Router();
-
-paymentsRouter.post('/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const { amount, method, packId } = req.body;
-    if (!amount || !method) return sendError(res, 'Montant et méthode requis', 400);
-
-    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-
-    const payment = await prisma.payment.create({
-      data: {
-        userId: req.user!.id,
-        amount,
-        method: method.toUpperCase() as any,
-        reference,
-        packId,
-        status: 'PENDING',
-      },
-    });
-
-    sendSuccess(res, { payment, reference, paymentUrl: `https://pay.xhris.host/checkout/${reference}` }, 'Paiement initié');
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
-
-// POST /api/payments/fapshi/initiate — Fapshi automatic payment
-paymentsRouter.post('/fapshi/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const { packId, coins, amount, phone } = req.body;
-    if (!packId || !coins || !amount) {
-      return sendError(res, 'Paramètres manquants (packId, coins, amount requis)', 400);
-    }
-
-    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
-    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
-      ? 'https://sandbox.fapshi.com'
-      : 'https://live.fapshi.com';
-
-    const amountXAF = Math.max(100, Math.round(Number(amount) * 655));
-    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-
-    const APP_URL = (process.env.FRONTEND_URL || 'https://xhrishost.site').replace(/\/$/, '');
-    const API_URL = (process.env.BACKEND_URL  || 'https://api.xhrishost.site').replace(/\/$/, '');
-
-    const redirectUrl = `${APP_URL}/dashboard/coins/buy?success=1&ref=${reference}`;
-    const webhookUrl  = `${API_URL}/api/payments/fapshi/webhook`;
-
-    // Create pending payment in DB
-    await prisma.payment.create({
-      data: { userId: req.user!.id, amount, method: 'FAPSHI' as any, reference, packId, status: 'PENDING' },
-    });
-
-    if (!FAPSHI_API_KEY || !FAPSHI_API_USER) {
-      console.error('[Fapshi] Clés API manquantes (FAPSHI_API_KEY / FAPSHI_API_USER)');
-      return sendError(res, 'Paiement Fapshi non configuré côté serveur. Contactez l\'administrateur.', 500);
-    }
-
-    const fapshiPayload: any = {
-      amount: amountXAF,
-      message: `XHRIS Host - ${coins} Coins (${packId})`,
-      externalId: reference,
-      redirectUrl,
-      webhookUrl,
-      email: req.user!.email || undefined,
-      userId: req.user!.id,
-    };
-    if (phone && String(phone).trim()) {
-      fapshiPayload.phone = String(phone).replace(/\s/g, '').replace(/^\+/, '');
-    }
-
-    let fapshiStatus = 0;
-    let rawText = '';
-    try {
-      const r = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'apiuser': FAPSHI_API_USER,
-          'apikey': FAPSHI_API_KEY,
-        },
-        body: JSON.stringify(fapshiPayload),
-      });
-      fapshiStatus = r.status;
-      rawText = await r.text();
-    } catch (e: any) {
-      console.error('[Fapshi] Erreur réseau:', e?.message);
-      await prisma.payment.update({
-        where: { reference }, data: { status: 'FAILED' },
-      }).catch(() => {});
-      return sendError(res, 'Service de paiement Fapshi injoignable. Réessayez.', 502);
-    }
-
-    let fapshiData: any = null;
-    try { fapshiData = rawText ? JSON.parse(rawText) : null; } catch { fapshiData = { raw: rawText }; }
-
-    if (fapshiStatus < 200 || fapshiStatus >= 300) {
-      console.error('[Fapshi] Réponse non-OK:', fapshiStatus, fapshiData);
-      await prisma.payment.update({
-        where: { reference }, data: { status: 'FAILED' },
-      }).catch(() => {});
-      return sendError(
-        res,
-        fapshiData?.message || `Erreur Fapshi (${fapshiStatus})`,
-        400
-      );
-    }
-
-    const link    = fapshiData?.link;
-    const transId = fapshiData?.transId;
-
-    if (!link) {
-      console.error('[Fapshi] Pas de "link" dans la réponse:', fapshiData);
-      return sendError(res, 'Réponse Fapshi invalide (pas de lien de paiement)', 502);
-    }
-
-    return sendSuccess(res, {
-      reference,
-      link,
-      paymentUrl: link,
-      transId: transId || null,
-    }, 'Paiement Fapshi initié');
-  } catch (err: any) {
-    console.error('[Fapshi initiate] erreur:', err?.message);
-    return sendError(res, 'Erreur lors de l\'initiation Fapshi', 500);
-  }
-});
-
-// POST /api/payments/geniuspay/initiate — GeniusPay checkout
-paymentsRouter.post('/geniuspay/initiate', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const { packId, coins, amount, currency = 'XOF', description, successUrl, errorUrl } = req.body;
-    if (!packId || !coins || !amount) return sendError(res, 'Paramètres manquants', 400);
-
-    const GP_PUBLIC_KEY = process.env.GENIUSPAY_PUBLIC_KEY || '';
-    const GP_SECRET_KEY = process.env.GENIUSPAY_SECRET_KEY || '';
-    const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-
-    await prisma.payment.create({
-      data: { userId: req.user!.id, amount, method: 'GENIUSPAY' as any, reference, packId, status: 'PENDING' },
-    });
-
-    if (GP_PUBLIC_KEY && GP_SECRET_KEY) {
-      const gpRes = await fetch('https://pay.genius.ci/api/v1/merchant/payments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': GP_PUBLIC_KEY,
-          'X-API-Secret': GP_SECRET_KEY,
-        },
-        body: JSON.stringify({
-          amount,
-          currency,
-          description: description || `XHRIS Host - ${coins} Coins (${packId})`,
-          customer: { email: req.user!.email },
-          metadata: { order_id: reference, pack_id: packId, coins, user_id: req.user!.id },
-          success_url: successUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?success=1&ref=${reference}`,
-          error_url: errorUrl || `${process.env.FRONTEND_URL}/dashboard/coins/buy?error=1&ref=${reference}`,
-        }),
-      });
-      const gpData: any = await gpRes.json();
-      if (!gpRes.ok) return sendError(res, gpData?.error?.message || 'Erreur GeniusPay', 400);
-
-      sendSuccess(res, {
-        reference,
-        checkoutUrl: gpData.data?.checkout_url,
-        paymentUrl: gpData.data?.payment_url,
-        gpReference: gpData.data?.reference,
-      }, 'Paiement GeniusPay initié');
-    } else {
-      sendSuccess(res, { reference, checkoutUrl: null }, 'GeniusPay non configuré — mode dev');
-    }
-  } catch (err) { sendError(res, 'Erreur GeniusPay', 500); }
-});
-
-// POST /api/payments/fapshi/webhook — NO AUTH (called by Fapshi)
-paymentsRouter.post('/fapshi/webhook', async (req: any, res: Response) => {
-  try {
-    const { transId, status, externalId } = req.body || {};
-    console.log('[Fapshi webhook] reçu:', { transId, status, externalId });
-
-    if (!transId && !externalId) {
-      return res.json({ success: true });
-    }
-
-    const FAPSHI_API_KEY  = process.env.FAPSHI_API_KEY  || '';
-    const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-    const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
-      ? 'https://sandbox.fapshi.com'
-      : 'https://live.fapshi.com';
-
-    let paymentStatus = status;
-    let verifiedData: any = null;
-    if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
-      try {
-        const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
-          headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
-        });
-        verifiedData = await verifyRes.json();
-        paymentStatus = verifiedData?.status || status;
-        console.log('[Fapshi webhook] statut vérifié:', paymentStatus);
-      } catch (e: any) {
-        console.error('[Fapshi webhook] échec vérification:', e?.message);
-      }
-    }
-
-    const ref = externalId || verifiedData?.externalId;
-    if (!ref) {
-      console.error('[Fapshi webhook] pas de référence');
-      return res.json({ success: true });
-    }
-
-    if (paymentStatus === 'SUCCESSFUL') {
-      const payment = await prisma.payment.findUnique({ where: { reference: ref } });
-      if (!payment) {
-        console.error('[Fapshi webhook] payment introuvable:', ref);
-        return res.json({ success: true });
-      }
-
-      if (payment.status === 'COMPLETED') {
-        return res.json({ success: true, alreadyProcessed: true });
-      }
-
-      const pack = payment.packId
-        ? await (prisma as any).creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
-        : null;
-
-      const HARDCODED: Record<string, { coins: number; bonus: number }> = {
-        'pack-500':   { coins: 500,   bonus: 0    },
-        'pack-1000':  { coins: 1000,  bonus: 100  },
-        'pack-2500':  { coins: 2500,  bonus: 300  },
-        'pack-5000':  { coins: 5000,  bonus: 700  },
-        'pack-10000': { coins: 10000, bonus: 1500 },
-      };
-      const hc = payment.packId ? HARDCODED[payment.packId] : null;
-
-      const coins = pack
-        ? (pack.coins + (pack.bonus || 0))
-        : hc
-          ? (hc.coins + hc.bonus)
-          : Math.floor((payment.amount || 0) * 10);
-
-      await prisma.$transaction([
-        prisma.payment.update({ where: { reference: ref }, data: { status: 'COMPLETED' } }),
-        ...(coins > 0 ? [
-          prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
-          prisma.transaction.create({
-            data: {
-              userId: payment.userId,
-              type: 'PURCHASE' as any,
-              amount: coins,
-              description: `Achat ${coins} coins via Fapshi Mobile Money`,
-              reference: ref,
-            },
-          }),
-        ] : []),
-      ]);
-
-      if (coins > 0) {
-        await notify(payment.userId, {
-          title: '💰 Paiement reçu !',
-          message: `${coins} coins ont été crédités à votre compte.`,
-          type: 'PAYMENT',
-          link: '/dashboard/coins',
-        }).catch(() => {});
-      }
-
-      console.log('[Fapshi webhook] paiement complété:', ref, `+${coins} coins`);
-    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED' || paymentStatus === 'EXPIRED') {
-      await prisma.payment.updateMany({
-        where: { reference: ref, status: 'PENDING' },
-        data: { status: 'FAILED' },
-      });
-      console.log('[Fapshi webhook] paiement échoué:', ref, paymentStatus);
-    }
-
-    res.json({ success: true });
-  } catch (e: any) {
-    console.error('[Fapshi webhook] erreur:', e?.message);
-    res.status(500).json({ success: false });
-  }
-});
-
-// GET /api/payments/fapshi/webhook — Fapshi peut tester le webhook en GET
-paymentsRouter.get('/fapshi/webhook', async (_req: any, res: Response) => {
-  res.json({ ok: true, message: 'XHRIS Host Fapshi webhook endpoint' });
-});
-
-// GET /api/payments/fapshi/verify/:reference
-paymentsRouter.get('/fapshi/verify/:reference', async (req: any, res: Response) => {
-  try {
-    const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
-    if (!payment) return sendError(res, 'Paiement non trouvé', 404);
-    sendSuccess(res, { status: payment.status, reference: payment.reference, amount: payment.amount, packId: payment.packId });
+    const safeBots = bots.map(b => ({ ...b, envVars: maskEnvVars(b.envVars) }));
+    sendPaginated(res, safeBots, total, page, limit);
   } catch { sendError(res, 'Erreur', 500); }
 });
 
-// POST /api/payments/geniuspay/webhook — Receive GeniusPay webhook (no auth)
-paymentsRouter.post('/geniuspay/webhook', async (req: any, res: Response) => {
+// GET /api/bots/:id
+router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const signature = req.headers['x-webhook-signature'] as string;
-    const timestamp = req.headers['x-webhook-timestamp'] as string;
-    const event = req.headers['x-webhook-event'] as string;
-    const webhookSecret = process.env.GENIUSPAY_WEBHOOK_SECRET || '';
-
-    // Verify signature
-    if (webhookSecret && signature && timestamp) {
-      const { createHmac } = await import('crypto');
-      const data = `${timestamp}.${JSON.stringify(req.body)}`;
-      const expected = createHmac('sha256', webhookSecret).update(data).digest('hex');
-      if (expected !== signature) {
-        return res.status(401).json({ success: false, message: 'Signature invalide' });
-      }
-      // Replay attack protection (5 min)
-      if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
-        return res.status(400).json({ success: false, message: 'Timestamp expiré' });
-      }
-    }
-
-    const payload = req.body;
-    const gpRef = payload?.data?.metadata?.order_id as string | undefined;
-
-    if (event === 'payment.success' && gpRef) {
-      const payment = await prisma.payment.findUnique({ where: { reference: gpRef } });
-      if (payment && payment.status === 'PENDING') {
-        const coinsToCredit = Number(payload?.data?.metadata?.coins) || 0;
-        await prisma.$transaction([
-          prisma.payment.update({ where: { reference: gpRef }, data: { status: 'COMPLETED' } }),
-          ...(coinsToCredit > 0 ? [
-            prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coinsToCredit } } }),
-            prisma.transaction.create({
-              data: {
-                userId: payment.userId,
-                type: 'PURCHASE' as any,
-                amount: coinsToCredit,
-                description: `Achat ${coinsToCredit} coins via GeniusPay`,
-                reference: gpRef,
-              },
-            }),
-          ] : []),
-        ]);
-      }
-    }
-
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ success: false }); }
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    sendSuccess(res, { ...bot, envVars: maskEnvVars(bot.envVars) });
+  } catch { sendError(res, 'Erreur', 500); }
 });
 
-paymentsRouter.get('/verify/:reference', authMiddleware, async (req: AuthRequest, res: Response) => {
+// POST /api/bots/deploy
+router.post('/deploy', async (req: AuthRequest, res: Response) => {
   try {
-    const payment = await prisma.payment.findUnique({ where: { reference: req.params.reference } });
-    if (!payment) return sendError(res, 'Paiement non trouvé', 404);
-    sendSuccess(res, payment);
-  } catch (err) { sendError(res, 'Erreur', 500); }
-});
+    const { name, platform, sessionLink, envVars, marketplaceBotId, serverId: rawServerId } = req.body;
 
-paymentsRouter.post('/withdraw', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const { amount, method, details } = req.body;
-    if (!amount || amount < 10) return sendError(res, 'Montant minimum: €10', 400);
-    if (!method) return sendError(res, 'Méthode requise', 400);
+    let serverId = rawServerId || null;
+    if (!serverId) {
+      const existingServer = await prisma.server.findFirst({
+        where: { userId: req.user!.id, status: { in: ['ONLINE'] as any } },
+        orderBy: { createdAt: 'desc' },
+      }).catch(() => null);
+      serverId = existingServer?.id || null;
+    }
 
-    const fees: Record<string, number> = { CARD: 0.015, PAYPAL: 0.025, CRYPTO: 0.010, BANK_TRANSFER: 0.005 };
-    const fee = amount * (fees[method.toUpperCase()] || 0.015);
-    const net = amount - fee;
+    const marketplaceBot = marketplaceBotId
+      ? await prisma.marketplaceBot.findFirst({ where: { id: marketplaceBotId, status: 'PUBLISHED' } }).catch(() => null)
+      : null;
+    const botName = name || marketplaceBot?.name;
+    if (!botName) return sendError(res, 'Nom du bot requis', 400);
 
-    const withdrawal = await prisma.withdrawal.create({
-      data: { userId: req.user!.id, amount, fee, net, method: method.toUpperCase() as any, details: details || {} },
+    const deployCost = marketplaceBot?.coinsPerDay || 10;
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
+    if (!user || user.coins < deployCost) return sendError(res, `Coins insuffisants (${deployCost} requis)`, 400);
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const deployedToday = await prisma.transaction.count({
+      where: { userId: req.user!.id, type: 'DEPLOY_BOT', createdAt: { gte: today } },
+    });
+    if (deployedToday >= 10) return sendError(res, 'Limite quotidienne atteinte (10/jour)', 400);
+
+    const existingKey = await prisma.apiKey.findFirst({
+      where: { userId: req.user!.id, status: 'ACTIVE' },
+      select: { key: true },
+    });
+    const apiKeyValue = existingKey?.key || `xhs_live_${crypto.randomBytes(20).toString('hex')}`;
+    if (!existingKey) {
+      await prisma.apiKey.create({
+        data: { userId: req.user!.id, name: `Cle auto - ${botName}`, key: apiKeyValue, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
+      });
+    }
+
+    // Construire URL API avec /api force (BACKEND_URL peut etre sans /api)
+    const apiBaseRaw = (process.env.BACKEND_URL || 'https://api.xhrishost.site').replace(/\/$/, '');
+    const xhrisApiUrl = apiBaseRaw.endsWith('/api') ? apiBaseRaw : `${apiBaseRaw}/api`;
+
+    const mergedEnvVars: Record<string, string> = addRuntimeEnvAliases({
+      ...(envVars || {}),
+      // Identite XHRIS
+      XHRIS_API_KEY: apiKeyValue,
+      XHRIS_API_URL: xhrisApiUrl,
+      BOT_NAME: botName,
+      XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
+      // Owner immuable (graveé)
+      OWNER_NUMBER: process.env.OWNER_NUMBER || '',
+      // IA conversationnelle
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+      GROK_API_KEY: process.env.GROK_API_KEY || '',
+      // APIs gratuites
+      OMDB_API_KEY: process.env.OMDB_API_KEY || '',
+      AUDD_API_KEY: process.env.AUDD_API_KEY || '',
+      OPENWEATHER_KEY: process.env.OPENWEATHER_KEY || '',
+      // Avance optionnel
+      HF_TOKEN: process.env.HF_TOKEN || '',
+      REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN || '',
     });
 
-    sendSuccess(res, withdrawal, 'Demande de retrait soumise', 201);
-  } catch (err) { sendError(res, 'Erreur', 500); }
+    if (marketplaceBotId && marketplaceBot) {
+      if (marketplaceBot.githubUrl) mergedEnvVars.GITHUB_URL = marketplaceBot.githubUrl;
+      if (marketplaceBot.setupFile) mergedEnvVars.SETUP_FILE_PATH = marketplaceBot.setupFile;
+      if (!marketplaceBot.githubUrl && !marketplaceBot.setupFile) {
+        return sendError(res, 'Ce bot marketplace n a ni depot GitHub ni fichier de setup publie', 400);
+      }
+      await prisma.marketplaceBot.update({
+        where: { id: marketplaceBotId },
+        data: { downloads: { increment: 1 } },
+      }).catch(() => {});
+    }
+
+    const bot = await prisma.bot.create({
+      data: {
+        name: botName,
+        platform: (platform?.toUpperCase() || marketplaceBot?.platform || 'WHATSAPP') as any,
+        status: 'STARTING',
+        userId: req.user!.id,
+        serverId,
+        sessionLink,
+        envVars: mergedEnvVars,
+        coinsPerDay: deployCost,
+      },
+    });
+
+    // Injecter BOT_ID dans l'env du bot (necessaire pour .update et autres commandes)
+    mergedEnvVars.BOT_ID = bot.id;
+    await prisma.bot.update({
+      where: { id: bot.id },
+      data: { envVars: mergedEnvVars },
+    }).catch(() => {});
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: deployCost } } }),
+      prisma.transaction.create({ data: { userId: req.user!.id, type: 'DEPLOY_BOT', description: `Deploiement de ${botName}`, amount: -deployCost } }),
+    ]);
+
+    try {
+      const botPlatform = platform?.toUpperCase() || marketplaceBot?.platform || 'WHATSAPP';
+      const onReady = async () => {
+        appendBotLog(bot.id, 'Readiness marker detected; bot is online');
+        await prisma.bot.update({
+          where: { id: bot.id },
+          data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) },
+        }).catch(() => {});
+        await notify(req.user!.id, {
+          title: 'Bot connecté ! 🎉',
+          message: `${botName} est en ligne et prêt à recevoir des messages.`,
+          type: 'BOT',
+          link: '/dashboard/bots',
+        }).catch(() => {});
+      };
+      const onExit = async (code: number | null) => {
+        if (code === 0) return;
+        const latest = await prisma.bot.findUnique({ where: { id: bot.id }, select: { status: true } }).catch(() => null);
+        if (!latest || !['STARTING', 'RUNNING'].includes(latest.status)) return;
+        appendBotLog(bot.id, `Bot process stopped before a healthy WhatsApp session was confirmed (exit ${code ?? 'unknown'})`);
+        await prisma.bot.update({
+          where: { id: bot.id },
+          data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
+        }).catch(() => {});
+      };
+
+      let processId = '';
+      if (DOCKER_AVAILABLE) {
+        const containerId = await deployBotContainer(bot.id, botPlatform, mergedEnvVars);
+        processId = containerId;
+        await prisma.bot.update({
+          where: { id: bot.id },
+          data: { status: 'STARTING', processId: containerId, logs: readBotLogLines(bot.id, 50) },
+        });
+
+        let markedReady = false;
+        followBotContainerLogs(
+          bot.id,
+          async (line) => {
+            if (markedReady || !READY_LOG_PATTERN.test(line)) return;
+            markedReady = true;
+            await onReady();
+          },
+          onExit,
+        );
+
+        let installAttempts = 0;
+        const crashLoopDetector = setInterval(() => {
+          try {
+            const logs = readBotLogLines(bot.id, 200);
+            const attempts = logs.filter(l => /Installing system build tools/i.test(l)).length;
+            if (attempts > 2 && installAttempts !== attempts) {
+              installAttempts = attempts;
+              if (attempts >= 3) {
+                clearInterval(crashLoopDetector);
+                appendBotLog(bot.id, 'CRASH LOOP DETECTED: container restarting repeatedly. Stopping.');
+                import('child_process').then(({ execSync }) => {
+                  try { execSync(`docker stop xhris-bot-${bot.id}`, { stdio: 'ignore' }); } catch {}
+                  try { execSync(`docker update --restart=no xhris-bot-${bot.id}`, { stdio: 'ignore' }); } catch {}
+                });
+                prisma.bot.update({
+                  where: { id: bot.id },
+                  data: {
+                    status: 'ERROR',
+                    logs: readBotLogLines(bot.id, 100),
+                  },
+                }).catch(() => {});
+              }
+            }
+          } catch {}
+        }, 15_000);
+
+        setTimeout(async () => {
+          try {
+            const current = await prisma.bot.findUnique({
+              where: { id: bot.id },
+              select: { status: true, userId: true, name: true },
+            });
+            if (!current || current.status !== 'STARTING') return;
+
+            let isAlive = false;
+            try {
+              const result = execSync(
+                `docker inspect --format='{{.State.Running}}' xhris-bot-${bot.id}`,
+                { encoding: 'utf8' },
+              ).trim().replace(/'/g, '');
+              isAlive = result === 'true';
+            } catch {
+              isAlive = false;
+            }
+
+            if (isAlive) {
+              appendBotLog(bot.id, 'Healthcheck 120s: container alive, marking RUNNING');
+              await prisma.bot.update({
+                where: { id: bot.id },
+                data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) },
+              }).catch(() => {});
+              await prisma.notification.create({
+                data: {
+                  userId: current.userId,
+                  title: 'Bot en ligne ! 🎉',
+                  message: `${current.name} est démarré et fonctionne.`,
+                  type: 'BOT',
+                },
+              }).catch(() => {});
+            } else {
+              appendBotLog(bot.id, 'Healthcheck 120s: container NOT running, marking ERROR');
+              await prisma.bot.update({
+                where: { id: bot.id },
+                data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
+              }).catch(() => {});
+            }
+          } catch (e: any) {
+            appendBotLog(bot.id, `Healthcheck error: ${e?.message || e}`);
+          }
+        }, 120_000);
+      } else {
+        const pid = await deployBotNative(bot.id, botPlatform, mergedEnvVars, onReady, onExit);
+        processId = pid;
+        await prisma.bot.update({
+          where: { id: bot.id },
+          data: { status: 'STARTING', processId: pid, logs: readBotLogLines(bot.id, 50) },
+        });
+      }
+
+      logger.info(`Bot deploy started: ${bot.id} runner=${DOCKER_AVAILABLE ? 'docker' : 'native'} process=${processId}`);
+      return sendSuccess(res, { ...bot, status: 'STARTING', processId, apiKey: apiKeyValue }, 'Bot en cours de deploiement', 201);
+    } catch (err: any) {
+      const message = err?.message || 'Erreur inconnue';
+      appendBotLog(bot.id, `Deployment failed: ${message}`);
+      logger.error(`Bot deploy failed: ${bot.id} - ${message}`);
+      const failedBot = await prisma.bot.update({
+        where: { id: bot.id },
+        data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
+      });
+      return res.status(500).json({ success: false, message, data: { ...failedBot, apiKey: apiKeyValue } });
+    }
+  } catch (err: any) {
+    logger.error(`Bot deploy route failed: ${err?.message || err}`);
+    return sendError(res, 'Erreur lors du deploiement', 500);
+  }
 });
 
-paymentsRouter.get('/withdrawals', authMiddleware, async (req: AuthRequest, res: Response) => {
+// POST /api/bots/:id/start
+router.post('/:id/start', async (req: AuthRequest, res: Response) => {
   try {
-    const withdrawals = await prisma.withdrawal.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
-    sendSuccess(res, withdrawals);
-  } catch (err) { sendError(res, 'Erreur', 500); }
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (bot.status === 'RUNNING') return sendError(res, 'Bot déjà en cours', 400);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
+    if (!user || user.coins < bot.coinsPerDay) return sendError(res, 'Coins insuffisants', 400);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STARTING' } });
+    if (DOCKER_AVAILABLE) {
+      startBotContainer(bot.id)
+        .then(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } });
+        })
+        .catch(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } });
+        });
+    } else {
+      startBotNative(
+        bot.id,
+        bot.platform,
+        addRuntimeEnvAliases((bot.envVars as Record<string, string>) || {}),
+        async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+        },
+        async (code) => {
+          if (code === 0) return;
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+        },
+      ).then(async (pid) => {
+        await prisma.bot.update({ where: { id: bot.id }, data: { processId: pid, logs: readBotLogLines(bot.id, 50) } }).catch(() => {});
+      }).catch(async () => {
+        await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+      });
+    }
+    sendSuccess(res, null, 'Bot en cours de démarrage');
+  } catch { sendError(res, 'Erreur', 500); }
 });
+
+// POST /api/bots/:id/stop
+router.post('/:id/stop', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (DOCKER_AVAILABLE) await stopBotContainer(bot.id);
+    else await stopBotNative(bot.id);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STOPPED', cpuUsage: 0, ramUsage: 0 } });
+    sendSuccess(res, null, 'Bot arrêté');
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+// POST /api/bots/:id/restart
+router.post('/:id/restart', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    await prisma.bot.update({ where: { id: bot.id }, data: { status: 'STARTING', restarts: { increment: 1 } } });
+    if (DOCKER_AVAILABLE) {
+      await stopBotContainer(bot.id);
+      startBotContainer(bot.id)
+        .then(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } });
+        })
+        .catch(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } });
+        });
+    } else {
+      await stopBotNative(bot.id);
+      startBotNative(
+        bot.id,
+        bot.platform,
+        addRuntimeEnvAliases((bot.envVars as Record<string, string>) || {}),
+        async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+        },
+        async (code) => {
+          if (code === 0) return;
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+        },
+      ).then(async (pid) => {
+        await prisma.bot.update({ where: { id: bot.id }, data: { processId: pid, logs: readBotLogLines(bot.id, 50) } }).catch(() => {});
+      }).catch(async () => {
+        await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) } }).catch(() => {});
+      });
+    }
+    sendSuccess(res, null, 'Bot en cours de redémarrage');
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+// POST /api/bots/:id/redeploy - Re-deploie le bot avec les derniers commits du repo
+// Auth: JWT (UI) ou x-api-key (depuis le bot via .update)
+router.post('/:id/redeploy', async (req: AuthRequest, res: Response) => {
+  try {
+    // Auth flexible
+    let userId = req.user?.id;
+    if (!userId) {
+      const apiKey = req.headers['x-api-key'] as string;
+      if (!apiKey) return sendError(res, 'Auth requise (JWT ou x-api-key)', 401);
+      const key = await prisma.apiKey.findFirst({
+        where: { key: apiKey, status: 'ACTIVE' },
+        select: { userId: true },
+      });
+      if (!key) return sendError(res, 'API key invalide', 401);
+      userId = key.userId;
+    }
+
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId } });
+    if (!bot) return sendError(res, 'Bot non trouve', 404);
+
+    await prisma.bot.update({
+      where: { id: bot.id },
+      data: { status: 'STARTING', restarts: { increment: 1 } },
+    });
+
+    // Env vars existantes + BOT_ID garanti
+    const existingEnv = (bot.envVars as Record<string, string>) || {};
+    const mergedEnv = addRuntimeEnvAliases({
+      ...existingEnv,
+      BOT_ID: bot.id,
+    });
+
+    // Cleanup container + workdir
+    if (DOCKER_AVAILABLE) {
+      try { await deleteBotContainer(bot.id); } catch (e: any) {
+        logger.error(`[redeploy ${bot.id}] cleanup container: ${e?.message || 'unknown'}`);
+      }
+    } else {
+      try { await stopBotNative(bot.id); } catch {}
+      try { await deleteBotNative(bot.id); } catch {}
+    }
+
+    try {
+      const workDir = path.join('/tmp/xhris-bots', bot.id);
+      if (fs.existsSync(workDir)) {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      }
+    } catch (e: any) {
+      logger.error(`[redeploy ${bot.id}] cleanup workdir: ${e?.message || 'unknown'}`);
+    }
+
+    // Re-deployer en async (reponse immediate)
+    if (DOCKER_AVAILABLE) {
+      deployBotContainer(bot.id, bot.platform as any, mergedEnv)
+        .then(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } }).catch(() => {});
+        })
+        .catch(async (e: any) => {
+          logger.error(`[redeploy ${bot.id}] failed: ${e?.message || 'unknown'}`);
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => {});
+        });
+    } else {
+      deployBotNative(
+        bot.id,
+        bot.platform as any,
+        mergedEnv,
+        async () => {
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { status: 'RUNNING', logs: readBotLogLines(bot.id, 100) },
+          }).catch(() => {});
+        },
+        async (code: number) => {
+          if (code === 0) return;
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { status: 'ERROR', logs: readBotLogLines(bot.id, 100) },
+          }).catch(() => {});
+        },
+      )
+        .then(async (pid: number) => {
+          await prisma.bot.update({
+            where: { id: bot.id },
+            data: { processId: pid, logs: readBotLogLines(bot.id, 50) },
+          }).catch(() => {});
+        })
+        .catch(async () => {
+          await prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => {});
+        });
+    }
+
+    sendSuccess(res, { botId: bot.id }, 'Redeploiement initie - le bot revient dans 2-3 min');
+  } catch (err: any) {
+    logger.error(`[redeploy] error: ${err?.message || 'unknown'}`);
+    sendError(res, 'Erreur lors du redeploiement', 500);
+  }
+});
+
+// DELETE /api/bots/:id
+router.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (DOCKER_AVAILABLE) await deleteBotContainer(bot.id);
+    else await deleteBotNative(bot.id);
+    await prisma.bot.delete({ where: { id: bot.id } });
+    sendSuccess(res, null, 'Bot supprimé');
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+// GET /api/bots/:id/logs
+router.get('/:id/logs', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id }, select: { logs: true, status: true } });
+    if (!bot) return sendError(res, 'Bot non trouve', 404);
+    const fileLogs = readBotLogLines(req.params.id, 200);
+    const dockerLogs = fileLogs.length > 0 ? fileLogs : await getBotContainerLogs(req.params.id);
+    const logs = dockerLogs.length > 0 ? dockerLogs : (bot.logs.length > 0 ? bot.logs : ['Aucun log disponible']);
+    return sendSuccess(res, { logs, status: bot.status });
+  } catch {
+    return sendError(res, 'Erreur', 500);
+  }
+});
+
+// GET /api/bots/:id/logs/stream
+router.get('/:id/logs/stream', async (req: AuthRequest, res: Response) => {
+  const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id }, select: { id: true } });
+  if (!bot) return sendError(res, 'Bot non trouve', 404);
+
+  const logPath = ensureBotLogFile(req.params.id);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  let lastOffset = 0;
+  const sendLine = (line: string) => {
+    if (!line.trim()) return;
+    res.write(`data: ${JSON.stringify({ line, ts: new Date().toISOString() })}\n\n`);
+  };
+
+  const readNewBytes = () => {
+    fs.stat(logPath, (statErr, stats) => {
+      if (statErr) return;
+      if (stats.size < lastOffset) lastOffset = 0;
+      if (stats.size === lastOffset) return;
+      const stream = fs.createReadStream(logPath, { start: lastOffset, end: stats.size - 1, encoding: 'utf8' });
+      lastOffset = stats.size;
+      let buffer = '';
+      stream.on('data', (chunk) => {
+        buffer += chunk;
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        lines.forEach(sendLine);
+      });
+      stream.on('end', () => {
+        if (buffer) sendLine(buffer);
+      });
+    });
+  };
+
+  readNewBytes();
+  const interval = setInterval(readNewBytes, 500);
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 15000);
+
+  req.on('close', () => {
+    clearInterval(interval);
+    clearInterval(heartbeat);
+    res.end();
+  });
+});
+
+// PATCH /api/bots/:id/env
+router.patch('/:id/env', async (req: AuthRequest, res: Response) => {
+  try {
+    const { vars } = req.body;
+    const bot = await prisma.bot.findFirst({ where: { id: req.params.id, userId: req.user!.id } });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    // Protect system keys — restore original values even if user tries to overwrite
+    const PROTECTED = ['XHRIS_API_KEY', 'XHRIS_API_URL', 'XHRIS_DEPLOY_TYPE', 'BOT_NAME'];
+    const existingEnv = (bot.envVars as any) || {};
+    const safeVars = { ...vars };
+    PROTECTED.forEach(k => { if (existingEnv[k]) safeVars[k] = existingEnv[k]; });
+    const updated = await prisma.bot.update({ where: { id: bot.id }, data: { envVars: safeVars } });
+    sendSuccess(res, { ...updated, envVars: maskEnvVars(updated.envVars) }, 'Variables mises à jour');
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+// GET /api/bots/:id/stats
+router.get('/:id/stats', async (req: AuthRequest, res: Response) => {
+  try {
+    const bot = await prisma.bot.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+      select: { cpuUsage: true, ramUsage: true, uptime: true, restarts: true, status: true },
+    });
+    if (!bot) return sendError(res, 'Bot non trouvé', 404);
+    if (bot.status === 'RUNNING') {
+      const { cpu, ram } = DOCKER_AVAILABLE
+        ? await getBotContainerStats(req.params.id)
+        : await getBotNativeStats(req.params.id);
+      sendSuccess(res, { ...bot, cpuUsage: cpu, ramUsage: ram });
+    } else {
+      sendSuccess(res, bot);
+    }
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+export default router;
