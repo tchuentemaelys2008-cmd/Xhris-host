@@ -114,6 +114,30 @@ app.use('/api/developer', authMiddleware, developerRoutes);
 app.use('/api/api-keys', authMiddleware, apiKeyRoutes);
 app.use('/api/webhooks', authMiddleware, webhookRoutes);
 app.use('/api/notifications', authMiddleware, notificationRoutes);
+// Endpoint public testimony (pas d'auth) - DOIT etre AVANT supportRouter avec authMiddleware
+app.get('/api/support/testimony/public', async (_req, res) => {
+  try {
+    const { prisma } = await import('./utils/prisma');
+    const testimonies = await prisma.testimony.findMany({
+      where: { approved: true },
+      orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+      take: 50,
+      include: { user: { select: { name: true, avatar: true } } },
+    });
+    const safe = testimonies.map((t: any) => ({
+      id: t.id,
+      content: t.content,
+      rating: t.rating,
+      featured: t.featured,
+      createdAt: t.createdAt,
+      author: t.user?.name || 'Anonyme',
+      avatar: t.user?.avatar || null,
+    }));
+    res.json({ success: true, data: safe });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Erreur' });
+  }
+});
 app.use('/api/support', authMiddleware, supportRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
