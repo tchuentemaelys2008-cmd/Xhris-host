@@ -506,10 +506,10 @@ router.post('/:id/redeploy', async (req: AuthRequest, res: Response) => {
           }).catch(() => {});
         },
       )
-        .then(async (pid: number) => {
+        .then(async (pid: string) => {
           await prisma.bot.update({
             where: { id: bot.id },
-            data: { processId: String(pid), logs: readBotLogLines(bot.id, 50) },
+            data: { processId: pid, logs: readBotLogLines(bot.id, 50) },
           }).catch(() => {});
         })
         .catch(async () => {
