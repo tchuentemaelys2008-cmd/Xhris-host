@@ -849,15 +849,19 @@ paymentsRouter.get('/withdrawals', authMiddleware, async (req: AuthRequest, res:
 // Helper auth flexible : JWT (req.user) OU x-api-key (depuis le bot)
 async function resolveTestimonyUser(req: any): Promise<{ userId: string; isAdmin: boolean } | null> {
   if (req.user?.id) {
-    return { userId: req.user.id, isAdmin: !!req.user.isAdmin };
+    // Récupérer le user complet pour avoir isAdmin
+    const u = await prisma.user.findUnique({ where: { id: req.user.id } });
+    return { userId: req.user.id, isAdmin: !!(u as any)?.isAdmin };
   }
   const apiKey = req.headers['x-api-key'] as string;
   if (apiKey) {
     const key = await prisma.apiKey.findFirst({
       where: { key: apiKey, status: 'ACTIVE' },
-      select: { userId: true, user: { select: { isAdmin: true } } },
     });
-    if (key) return { userId: key.userId, isAdmin: !!key.user?.isAdmin };
+    if (key) {
+      const u = await prisma.user.findUnique({ where: { id: key.userId } });
+      return { userId: key.userId, isAdmin: !!(u as any)?.isAdmin };
+    }
   }
   return null;
 }
