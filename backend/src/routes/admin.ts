@@ -780,6 +780,92 @@ router.post('/bots/:id/review', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
+// ============ GIFT DROP SYSTEM ============
+
+function generateGiftCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const part = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return `XMD-${part}`;
+}
+
+router.post('/gifts', async (req: AuthRequest, res: Response) => {
+  try {
+    const { title, description, mainReward, consolationReward, winnersLimit, totalCapacity, expiresAt, requireChannelJoin, distributionMode } = req.body;
+    if (typeof mainReward !== 'number' || mainReward <= 0) return sendError(res, 'mainReward invalide', 400);
+    if (typeof winnersLimit !== 'number' || winnersLimit < 1) return sendError(res, 'winnersLimit invalide', 400);
+    if (!expiresAt) return sendError(res, 'expiresAt requis', 400);
+    const expiresDate = new Date(expiresAt);
+    if (isNaN(expiresDate.getTime()) || expiresDate <= new Date()) return sendError(res, 'expiresAt doit être une date future', 400);
+    if (!['site', 'channel'].includes(distributionMode)) return sendError(res, 'distributionMode invalide (site|channel)', 400);
+    const cap = totalCapacity || winnersLimit * 10;
+    if (cap < winnersLimit) return sendError(res, 'totalCapacity doit être >= winnersLimit', 400);
+
+    let code = '';
+    for (let i = 0; i < 5; i++) {
+      code = generateGiftCode();
+      const exists = await (prisma as any).giftDrop.findUnique({ where: { code } });
+      if (!exists) break;
+      if (i === 4) return sendError(res, 'Erreur génération code', 500);
+    }
+
+    const gift = await (prisma as any).giftDrop.create({
+      data: {
+        code, title: title || 'Cadeau XHRIS-MD', description: description || null,
+        mainReward, consolationReward: consolationReward || 0,
+        winnersLimit, totalCapacity: cap, expiresAt: expiresDate,
+        requireChannelJoin: requireChannelJoin !== false,
+        distributionMode, createdBy: req.user!.id,
+      },
+    });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+    sendSuccess(res, { ...gift, link: `${frontendUrl}/gift/${gift.id}` }, 'Cadeau créé');
+  } catch (err: any) { sendError(res, 'Erreur: ' + err.message, 500); }
+});
+
+router.get('/gifts', async (_req: AuthRequest, res: Response) => {
+  try {
+    const gifts = await (prisma as any).giftDrop.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { claims: true } } },
+    });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+    sendSuccess(res, gifts.map((g: any) => ({
+      ...g,
+      link: `${frontendUrl}/gift/${g.id}`,
+      claimsCount: g._count?.claims || 0,
+      isExpired: new Date(g.expiresAt) <= new Date(),
+      isFull: (g._count?.claims || 0) >= g.totalCapacity,
+    })));
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+router.get('/gifts/:id/claims', async (req: AuthRequest, res: Response) => {
+  try {
+    const claims = await (prisma as any).giftClaim.findMany({
+      where: { giftDropId: req.params.id },
+      orderBy: { position: 'asc' },
+      include: { user: { select: { id: true, name: true, email: true, avatar: true } } },
+    });
+    sendSuccess(res, claims);
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+router.patch('/gifts/:id/toggle', async (req: AuthRequest, res: Response) => {
+  try {
+    const g = await (prisma as any).giftDrop.findUnique({ where: { id: req.params.id } });
+    if (!g) return sendError(res, 'Cadeau introuvable', 404);
+    const updated = await (prisma as any).giftDrop.update({ where: { id: req.params.id }, data: { active: !g.active } });
+    sendSuccess(res, updated, `Cadeau ${updated.active ? 'activé' : 'désactivé'}`);
+  } catch { sendError(res, 'Erreur', 500); }
+});
+
+router.delete('/gifts/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    await (prisma as any).giftDrop.delete({ where: { id: req.params.id } });
+    sendSuccess(res, null, 'Cadeau supprimé');
+  } catch (err: any) { sendError(res, 'Erreur: ' + err.message, 500); }
+});
+
 // ============ GROWTH SYSTEM ============
 
 // GET /api/admin/app-settings

@@ -9,7 +9,7 @@ import {
   Tag, Coins, DollarSign, ArrowDownLeft, BarChart2, Megaphone,
   FileText, HelpCircle, MessageSquare, Settings, BookOpen,
   Shield, Save, Zap, Crown, ChevronRight, Search, Bell,
-  Menu, X, Home, LogOut, Store,
+  Menu, X, Home, LogOut, Store, Gift,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 
@@ -39,6 +39,7 @@ const navGroups = [
   {
     label: 'CONTENU',
     items: [
+      { href: '/admin/gifts', icon: Gift, label: 'Cadeaux Bonus' },
       { href: '/admin/announcements', icon: Megaphone, label: 'Annonces' },
       { href: '/admin/pages', icon: FileText, label: 'Pages' },
       { href: '/admin/faq', icon: HelpCircle, label: 'FAQ' },

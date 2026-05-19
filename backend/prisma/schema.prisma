@@ -69,6 +69,7 @@ model User {
   pushSubscriptions     PushSubscription[]
   taskCompletions       TaskCompletion[]
   growthShares          GrowthShare[]
+  giftClaims            GiftClaim[]
 
   // Growth fields
   channelJoined     Boolean   @default(false)
@@ -881,6 +882,49 @@ model AppSettings {
   updatedAt        DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+// ============ GIFT DROP SYSTEM ============
+model GiftDrop {
+  id                  String   @id @default(uuid())
+  code                String   @unique
+  title               String   @default("Cadeau XHRIS-MD")
+  description         String?
+  mainReward          Int
+  consolationReward   Int      @default(0)
+  winnersLimit        Int      @default(5)
+  totalCapacity       Int      @default(50)
+  expiresAt           DateTime
+  requireChannelJoin  Boolean  @default(true)
+  distributionMode    String   @default("site")
+  active              Boolean  @default(true)
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  claims GiftClaim[]
+
+  @@index([code])
+  @@index([active, expiresAt])
+  @@map("gift_drops")
+}
+
+model GiftClaim {
+  id         String   @id @default(uuid())
+  giftDropId String
+  userId     String
+  rewardType String
+  coinsEarned Int
+  position   Int
+  claimedAt  DateTime @default(now())
+
+  giftDrop GiftDrop @relation(fields: [giftDropId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([giftDropId, userId])
+  @@index([giftDropId])
+  @@index([userId])
+  @@map("gift_claims")
 }
 
 // ============ PUSH SUBSCRIPTIONS ============

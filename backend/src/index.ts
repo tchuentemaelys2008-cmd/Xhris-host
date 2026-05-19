@@ -27,6 +27,7 @@ import supportRoutes from './routes/support';
 import paymentRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
 import growthRoutes from './routes/growth';
+import giftsRoutes from './routes/gifts';
 
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
@@ -141,6 +142,7 @@ app.get('/api/support/testimony/public', async (_req, res) => {
 });
 app.use('/api/support', authMiddleware, supportRoutes);
 app.use('/api/growth', authMiddleware, growthRoutes);
+app.use('/api/gifts', giftsRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
 

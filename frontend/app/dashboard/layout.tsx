@@ -18,6 +18,7 @@ import { SettingsProvider, useSettings } from '@/lib/settingsContext';
 import Footer from '@/components/Footer';
 import PushPrompt from '@/components/PushPrompt';
 import ChannelPopup from '@/components/ChannelPopup';
+import ActiveGiftBanner from '@/components/ActiveGiftBanner';
 import { registerSW } from '@/lib/push';
 
 // ─── SVG Coin Icon ───────────────────────────────────────────────
@@ -450,6 +451,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         </main>
         <Footer />
       </div>
+      <ActiveGiftBanner />
       <PushPrompt />
       <ChannelPopup />
     </div>
