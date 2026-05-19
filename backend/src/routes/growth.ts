@@ -5,12 +5,27 @@ import { sendSuccess, sendError } from '../utils/response';
 
 const router = Router();
 
+const STREAK_MILESTONES = [
+  { days: 10, bonus: 50 },
+  { days: 30, bonus: 150 },
+  { days: 50, bonus: 250 },
+  { days: 60, bonus: 300 },
+];
+
 async function getSettings() {
   let s = await (prisma as any).appSettings.findUnique({ where: { id: 'singleton' } });
-  if (!s) {
-    s = await (prisma as any).appSettings.create({ data: { id: 'singleton' } });
-  }
+  if (!s) s = await (prisma as any).appSettings.create({ data: { id: 'singleton' } });
   return s;
+}
+
+async function getUnlockedMilestones(userId: string): Promise<number[]> {
+  const rows = await (prisma as any).taskCompletion.findMany({
+    where: { userId, taskType: 'streak_milestone' },
+    select: { metadata: true },
+  });
+  return rows
+    .map((r: any) => { try { return JSON.parse(r.metadata || '{}').days; } catch { return 0; } })
+    .filter((d: number) => d > 0);
 }
 
 // GET /api/growth/tasks
@@ -21,7 +36,6 @@ router.get('/tasks', async (req: AuthRequest, res: Response) => {
     if (!user) return sendError(res, 'Utilisateur introuvable', 404);
 
     const settings = await getSettings();
-
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -35,19 +49,28 @@ router.get('/tasks', async (req: AuthRequest, res: Response) => {
       action: 'https://whatsapp.com/channel/0029Vark1I1AYlUR1G8YMX31',
     };
 
-    // Task 2: daily login
+    // Task 2: daily login (with streak data)
     const todayLogin = await (prisma as any).taskCompletion.findFirst({
       where: { userId, taskType: 'daily_login', createdAt: { gte: todayStart } },
     });
+    const lastCompletion = await (prisma as any).taskCompletion.findFirst({
+      where: { userId, taskType: 'daily_login' },
+      orderBy: { createdAt: 'desc' },
+    });
+    const unlockedMilestones = await getUnlockedMilestones(userId);
     const streak = (user as any).loginStreak || 0;
     const streakBonus = Math.min(15, streak);
+    const nextMilestone = STREAK_MILESTONES.find(m => !unlockedMilestones.includes(m.days)) || null;
     const taskDailyLogin = {
       id: 'daily_login',
       title: 'Connexion quotidienne',
-      description: `+${settings.dailyLoginBonus} coins par jour${streakBonus > 0 ? ` + ${streakBonus} bonus streak` : ''}`,
+      description: `+${settings.dailyLoginBonus} coins/jour${streakBonus > 0 ? ` + ${streakBonus} streak` : ''}`,
       reward: settings.dailyLoginBonus + streakBonus,
       completed: !!todayLogin,
       streak,
+      lastClaimedAt: lastCompletion?.createdAt || null,
+      milestonesCompleted: unlockedMilestones,
+      nextMilestone,
     };
 
     // Task 3: referral
@@ -72,7 +95,7 @@ router.get('/tasks', async (req: AuthRequest, res: Response) => {
     const taskShare = {
       id: 'share',
       title: 'Partager le site',
-      description: `+${settings.shareBonus} coins par jour, max 7 jours`,
+      description: `+${settings.shareBonus} coins/jour, max 7 jours`,
       reward: settings.shareBonus,
       completed: !!todayShare,
       progress: shareCount,
@@ -97,10 +120,10 @@ router.post('/complete/:taskId', async (req: AuthRequest, res: Response) => {
     const { taskId } = req.params;
     const settings = await getSettings();
 
+    // ── join_channel ──────────────────────────────────────────────────────────
     if (taskId === 'join_channel') {
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if ((user as any)?.channelJoined) return sendError(res, 'Déjà complété', 400);
-
       await prisma.$transaction([
         prisma.user.update({
           where: { id: userId },
@@ -113,9 +136,10 @@ router.post('/complete/:taskId', async (req: AuthRequest, res: Response) => {
           data: { userId, type: 'BONUS_CODE', amount: settings.joinChannelBonus, description: 'Rejoint la chaîne WhatsApp' },
         }),
       ]);
-      return sendSuccess(res, { reward: settings.joinChannelBonus }, `+${settings.joinChannelBonus} coins ! Merci d'avoir rejoint la chaîne.`);
+      return sendSuccess(res, { reward: settings.joinChannelBonus }, `+${settings.joinChannelBonus} coins !`);
     }
 
+    // ── daily_login ───────────────────────────────────────────────────────────
     if (taskId === 'daily_login') {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
@@ -124,7 +148,7 @@ router.post('/complete/:taskId', async (req: AuthRequest, res: Response) => {
       const alreadyToday = await (prisma as any).taskCompletion.findFirst({
         where: { userId, taskType: 'daily_login', createdAt: { gte: todayStart } },
       });
-      if (alreadyToday) return sendError(res, "Déjà connecté aujourd'hui", 400);
+      if (alreadyToday) return sendError(res, "Déjà activé aujourd'hui", 400);
 
       const hadYesterday = await (prisma as any).taskCompletion.findFirst({
         where: { userId, taskType: 'daily_login', createdAt: { gte: yesterdayStart, lt: todayStart } },
@@ -146,9 +170,36 @@ router.post('/complete/:taskId', async (req: AuthRequest, res: Response) => {
           data: { userId, type: 'BONUS_CODE', amount: reward, description: `Connexion quotidienne (streak ${newStreak}j)` },
         }),
       ]);
-      return sendSuccess(res, { reward, streak: newStreak }, `+${reward} coins (streak: ${newStreak}j)`);
+
+      // Check streak milestone bonus
+      const milestone = STREAK_MILESTONES.find(m => m.days === newStreak);
+      let milestoneUnlocked: { days: number; bonus: number } | null = null;
+      if (milestone) {
+        const alreadyGiven = await (prisma as any).taskCompletion.findFirst({
+          where: { userId, taskType: 'streak_milestone', metadata: { contains: `"days":${milestone.days}` } },
+        });
+        if (!alreadyGiven) {
+          await prisma.$transaction([
+            prisma.user.update({ where: { id: userId }, data: { coins: { increment: milestone.bonus } } }),
+            (prisma as any).taskCompletion.create({
+              data: { userId, taskType: 'streak_milestone', rewardCoins: milestone.bonus, metadata: JSON.stringify({ days: milestone.days }) },
+            }),
+            prisma.transaction.create({
+              data: { userId, type: 'BONUS_CODE', amount: milestone.bonus, description: `Palier streak ${milestone.days} jours !` },
+            }),
+          ]);
+          milestoneUnlocked = { days: milestone.days, bonus: milestone.bonus };
+        }
+      }
+
+      const msg = milestoneUnlocked
+        ? `+${reward} coins ! Palier ${milestoneUnlocked.days}j débloqué → +${milestoneUnlocked.bonus} coins bonus !`
+        : `+${reward} coins (streak ${newStreak}j)`;
+
+      return sendSuccess(res, { reward, streak: newStreak, milestoneUnlocked }, msg);
     }
 
+    // ── share ─────────────────────────────────────────────────────────────────
     if (taskId === 'share') {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
@@ -182,19 +233,17 @@ router.post('/complete/:taskId', async (req: AuthRequest, res: Response) => {
 router.get('/referral-stats', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.id;
-
     const totalReferred = await prisma.user.count({ where: { referredBy: userId } });
     const earned = await (prisma as any).taskCompletion.aggregate({
       where: { userId, taskType: 'referral' },
       _sum: { rewardCoins: true },
     });
-
     sendSuccess(res, {
       referralLink: `https://xhrishost.site?ref=${userId}`,
       totalReferred,
       totalEarned: earned._sum.rewardCoins || 0,
     });
-  } catch (err: any) {
+  } catch {
     sendError(res, 'Erreur', 500);
   }
 });
