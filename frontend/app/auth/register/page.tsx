@@ -44,16 +44,31 @@ export default function RegisterPage() {
         body: JSON.stringify({ name: `${form.firstName} ${form.lastName}`.trim(), email: form.email, password: form.password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      if (!res.ok || !data.success) {
+        throw new Error(data?.message || `Erreur ${res.status}`);
+      }
       toast.success('Compte créé !');
-      const result = await signIn('credentials', { email: form.email, password: form.password, redirect: false });
-      if (result?.ok && !result?.error) {
+
+      // Petit délai pour s'assurer que la DB a propagé (évite race condition)
+      await new Promise((r) => setTimeout(r, 800));
+
+      // Tenter le signIn avec retry (parfois la 1re tentative échoue)
+      let signInResult = await signIn('credentials', { email: form.email, password: form.password, redirect: false });
+      if (!signInResult?.ok && !signInResult?.error?.includes('Credentials')) {
+        // Retry une fois après 1s
+        await new Promise((r) => setTimeout(r, 1000));
+        signInResult = await signIn('credentials', { email: form.email, password: form.password, redirect: false });
+      }
+
+      if (signInResult?.ok && !signInResult?.error) {
         const session = await getSession();
         const accessToken = (session?.user as any)?.accessToken;
         if (accessToken) localStorage.setItem('auth_token', accessToken);
         router.push('/dashboard');
       } else {
-        router.push('/auth/login');
+        // L'inscription a réussi mais signIn auto a échoué : guider l'utilisateur
+        toast.success('Compte créé. Connecte-toi pour continuer.');
+        router.push(`/auth/login?email=${encodeURIComponent(form.email)}`);
       }
     } catch (err: any) {
       toast.error(err.message || 'Erreur lors de l\'inscription');
