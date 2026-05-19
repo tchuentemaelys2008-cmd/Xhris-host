@@ -116,14 +116,14 @@ function StreakHero({ task, onClaim, claiming }: { task: any; onClaim: () => voi
       )}
 
       {/* Milestone badges */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
         {MILESTONES.map(m => {
           const unlocked = unlockedMilestones.includes(m.days);
           const isNext = m === nextMilestone;
           return (
             <div
               key={m.days}
-              className={`rounded-xl p-2 sm:p-3 text-center border transition-all ${
+              className={`rounded-xl p-2 text-center border transition-all ${
                 unlocked
                   ? 'bg-orange-500/20 border-orange-500/40'
                   : isNext
@@ -131,13 +131,13 @@ function StreakHero({ task, onClaim, claiming }: { task: any; onClaim: () => voi
                   : 'bg-white/[0.03] border-white/5'
               }`}
             >
-              <div className="text-lg sm:text-xl mb-0.5">
-                {unlocked ? '🔥' : isNext ? '⏳' : <Lock className="w-4 h-4 text-gray-700 mx-auto" />}
+              <div className="text-base sm:text-xl mb-0.5 leading-none">
+                {unlocked ? '🔥' : isNext ? '⏳' : <Lock className="w-3.5 h-3.5 text-gray-700 mx-auto" />}
               </div>
-              <div className={`text-xs font-bold ${unlocked ? 'text-orange-300' : isNext ? 'text-gray-400' : 'text-gray-700'}`}>
+              <div className={`text-[11px] font-bold leading-tight ${unlocked ? 'text-orange-300' : isNext ? 'text-gray-400' : 'text-gray-700'}`}>
                 {m.days}j
               </div>
-              <div className={`text-[10px] ${unlocked ? 'text-orange-400' : isNext ? 'text-yellow-600' : 'text-gray-700'}`}>
+              <div className={`text-[9px] sm:text-[10px] leading-tight ${unlocked ? 'text-orange-400' : isNext ? 'text-yellow-600' : 'text-gray-700'}`}>
                 +{m.bonus}
               </div>
             </div>
@@ -147,15 +147,15 @@ function StreakHero({ task, onClaim, claiming }: { task: any; onClaim: () => voi
 
       {/* CTA button */}
       {completed ? (
-        <div className="w-full py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 font-semibold text-sm flex items-center justify-center gap-2">
-          <CheckCircle className="w-4 h-4" />
-          Activée aujourd'hui — Reviens demain !
+        <div className="w-full min-h-[48px] rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 font-semibold text-sm flex items-center justify-center gap-2">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          <span>Activée aujourd'hui — Reviens demain !</span>
         </div>
       ) : (
         <button
           onClick={onClaim}
           disabled={claiming}
-          className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+          className={`w-full min-h-[48px] rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
             flameState === 'broken' || flameState === 'new'
               ? 'bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50'
               : 'bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white shadow-lg shadow-orange-500/20 disabled:opacity-50'
@@ -166,7 +166,7 @@ function StreakHero({ task, onClaim, claiming }: { task: any; onClaim: () => voi
           ) : flameState === 'broken' ? (
             '🔁 Recommencer le streak'
           ) : (
-            `🔥 Activer ma flamme  +${task?.reward || 5} coins`
+            `🔥 Activer ma flamme +${task?.reward || 5} coins`
           )}
         </button>
       )}
@@ -231,7 +231,7 @@ function TaskCard({ task, onClaim, claiming }: { task: any; onClaim: (id: string
           </a>
         )}
         {task.completed ? (
-          <div className="flex-1 py-2 text-xs font-semibold bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg text-center flex items-center justify-center gap-1">
+          <div className="flex-1 min-h-[44px] text-xs font-semibold bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg text-center flex items-center justify-center gap-1">
             <CheckCircle className="w-3 h-3" />
             Complété
           </div>
@@ -239,7 +239,7 @@ function TaskCard({ task, onClaim, claiming }: { task: any; onClaim: (id: string
           <button
             onClick={() => onClaim(task.id)}
             disabled={claiming}
-            className="flex-1 py-2 text-xs font-semibold bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+            className="flex-1 min-h-[44px] text-xs font-semibold bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg transition-colors"
           >
             Réclamer
           </button>

@@ -80,7 +80,7 @@ export default function ChannelPopup() {
             href={CHANNEL_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-xl text-sm transition-colors"
+            className="flex items-center justify-center gap-2 w-full min-h-[48px] py-3 px-4 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-xl text-sm transition-colors"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M17.6 6.32A7.85 7.85 0 0 0 12.05 4 7.94 7.94 0 0 0 5.18 16l-1.18 4.32 4.42-1.16a7.93 7.93 0 0 0 3.8.97h.01a7.94 7.94 0 0 0 5.37-13.81z"/>
@@ -91,7 +91,7 @@ export default function ChannelPopup() {
           <button
             onClick={handleConfirm}
             disabled={loading}
-            className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-colors"
+            className="w-full min-h-[48px] py-3 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-colors"
           >
             {loading ? 'Vérification…' : "✅ J'ai rejoint — Recevoir +20 coins"}
           </button>

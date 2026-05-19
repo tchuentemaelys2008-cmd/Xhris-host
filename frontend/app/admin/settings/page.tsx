@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { Settings, Save, Loader2, Shield, Bell, Globe, Coins, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Settings, Save, Loader2, Shield, Bell, Globe, Coins, RefreshCw, AlertTriangle, Gift } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
@@ -10,12 +10,67 @@ import { cn } from '@/lib/utils';
 const TABS = [
   { id: 'general', label: 'Général', icon: Settings },
   { id: 'coins', label: 'Coins & Paiements', icon: Coins },
+  { id: 'pricing', label: 'Prix & Bonus', icon: Gift },
   { id: 'security', label: 'Sécurité', icon: Shield },
   { id: 'notifications', label: 'Notifications', icon: Bell },
 ];
 
+// ─── Reusable numeric field ───────────────────────────────────────────────────
+function PriceField({ label, help, value, onChange }: { label: string; help: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-3 border-b border-white/5 last:border-0">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-white font-medium">{label}</div>
+        <div className="text-xs text-gray-500 mt-0.5">{help}</div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <input
+          type="number"
+          min={0}
+          value={value}
+          onChange={e => onChange(Math.max(0, Number(e.target.value)))}
+          className="w-20 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-right font-mono text-sm focus:outline-none focus:border-purple-500"
+        />
+        <span className="text-xs text-gray-500 w-10">coins</span>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminSettingsPage() {
   const [tab, setTab] = useState('general');
+  const qc = useQueryClient();
+
+  // ── Prix & Bonus (app-settings) ──────────────────────────────────────────
+  const { data: appSettingsData, isLoading: appLoading } = useQuery({
+    queryKey: ['admin-app-settings'],
+    queryFn: () => apiClient.get('/admin/app-settings'),
+    enabled: tab === 'pricing',
+  });
+  const remoteSettings = (appSettingsData as any)?.data?.data ?? {};
+  const [pricing, setPricing] = useState({
+    deployCostCoins: 10, dailyLoginBonus: 5,
+    joinChannelBonus: 20, referralBonus: 10, shareBonus: 5,
+  });
+  useEffect(() => {
+    if (remoteSettings && typeof remoteSettings.deployCostCoins === 'number') {
+      setPricing({
+        deployCostCoins: remoteSettings.deployCostCoins,
+        dailyLoginBonus: remoteSettings.dailyLoginBonus,
+        joinChannelBonus: remoteSettings.joinChannelBonus,
+        referralBonus: remoteSettings.referralBonus,
+        shareBonus: remoteSettings.shareBonus,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteSettings.deployCostCoins]);
+
+  const pricingMutation = useMutation({
+    mutationFn: () => apiClient.patch('/admin/app-settings', pricing),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-app-settings'] }); toast.success('Prix & Bonus sauvegardés'); },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
+  });
+
   const [generalSettings, setGeneralSettings] = useState({
     siteName: 'XHRIS HOST',
     siteDescription: 'Plateforme de déploiement de bots',
@@ -141,6 +196,39 @@ export default function AdminSettingsPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === 'pricing' && (
+        <div className="bg-[#111118] border border-white/5 rounded-xl p-5 sm:p-6 space-y-2">
+          <div className="flex items-center gap-2 mb-4">
+            <Gift className="w-5 h-5 text-yellow-400" />
+            <h3 className="text-sm font-semibold text-white">Prix & Bonus Growth</h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Ces valeurs sont lues en temps réel par le système de tâches et de déploiement.
+          </p>
+          {appLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="animate-spin w-6 h-6 text-purple-400" /></div>
+          ) : (
+            <>
+              <PriceField label="💰 Coût d'un déploiement de bot" help="Coins requis pour déployer un bot (lu au moment du déploiement)" value={pricing.deployCostCoins} onChange={v => setPricing(p => ({ ...p, deployCostCoins: v }))} />
+              <PriceField label="📅 Bonus connexion quotidienne" help="Coins de base par login (hors bonus streak)" value={pricing.dailyLoginBonus} onChange={v => setPricing(p => ({ ...p, dailyLoginBonus: v }))} />
+              <PriceField label="📢 Bonus rejoindre la chaîne" help="Coins pour la tâche 'rejoindre la chaîne WhatsApp'" value={pricing.joinChannelBonus} onChange={v => setPricing(p => ({ ...p, joinChannelBonus: v }))} />
+              <PriceField label="👥 Bonus parrainage" help="Coins offerts à l'inviteur quand un filleul s'inscrit" value={pricing.referralBonus} onChange={v => setPricing(p => ({ ...p, referralBonus: v }))} />
+              <PriceField label="🔗 Bonus partage du site" help="Coins par partage journalier (max 7 jours)" value={pricing.shareBonus} onChange={v => setPricing(p => ({ ...p, shareBonus: v }))} />
+              <div className="flex justify-end pt-3">
+                <button
+                  onClick={() => pricingMutation.mutate()}
+                  disabled={pricingMutation.isPending}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors"
+                >
+                  {pricingMutation.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <Save className="w-4 h-4" />}
+                  Sauvegarder
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
