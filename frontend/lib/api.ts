@@ -241,4 +241,21 @@ export const paymentsApi = {
   getWithdrawals: () => apiClient.get('/payments/withdrawals'),
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// growthApi
+// ─────────────────────────────────────────────────────────────────────────────
+export const growthApi = {
+  getTasks: () => apiClient.get('/growth/tasks'),
+  completeTask: (taskId: string, data?: any) => apiClient.post(`/growth/complete/${taskId}`, data),
+  getReferralStats: () => apiClient.get('/growth/referral-stats'),
+};
+
+export const adminGrowthApi = {
+  getSettings: () => apiClient.get('/admin/app-settings'),
+  updateSettings: (data: any) => apiClient.patch('/admin/app-settings', data),
+  getStats: () => apiClient.get('/admin/growth-stats'),
+  updateBotDescription: (id: string, description: string) =>
+    apiClient.patch(`/admin/marketplace-bots/${id}/description`, { description }),
+};
+
 export default apiClient;

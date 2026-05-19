@@ -29,10 +29,15 @@ router.post('/register', async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 12);
     const emailVerifyToken = uuidv4();
 
-    // Find referrer
+    // Find referrer — by referralCode or by user ID (?ref=userId)
+    const refParam = (req.body.ref || req.query.ref || '') as string;
     let referrerId: string | null = null;
     if (referralCode) {
       const referrer = await prisma.user.findUnique({ where: { referralCode } });
+      if (referrer) referrerId = referrer.id;
+    }
+    if (!referrerId && refParam) {
+      const referrer = await prisma.user.findUnique({ where: { id: refParam } });
       if (referrer) referrerId = referrer.id;
     }
 
@@ -42,7 +47,7 @@ router.post('/register', async (req: Request, res: Response) => {
         email,
         password: hashedPassword,
         emailVerifyToken,
-        coins: 10, // Welcome bonus
+        coins: referrerId ? 15 : 10, // +5 bonus if referred
         referredBy: referrerId || undefined,
       },
     });
@@ -55,12 +60,22 @@ router.post('/register', async (req: Request, res: Response) => {
 
     // Give referrer bonus
     if (referrerId) {
+      const appSettings = await (prisma as any).appSettings.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+      const bonus = appSettings?.referralBonus || 10;
       await prisma.$transaction([
-        prisma.user.update({ where: { id: referrerId }, data: { coins: { increment: 10 } } }),
+        prisma.user.update({ where: { id: referrerId }, data: { coins: { increment: bonus } } }),
         prisma.transaction.create({
-          data: { userId: referrerId, type: 'REFERRAL', description: `Parrainage de ${name}`, amount: 10 }
+          data: { userId: referrerId, type: 'REFERRAL', description: `Parrainage de ${name}`, amount: bonus }
         }),
         prisma.referral.create({ data: { referrerId, referredId: user.id } }),
+        (prisma as any).taskCompletion.create({
+          data: {
+            userId: referrerId,
+            taskType: 'referral',
+            rewardCoins: bonus,
+            metadata: JSON.stringify({ referredUserId: user.id }),
+          },
+        }),
       ]);
     }
 

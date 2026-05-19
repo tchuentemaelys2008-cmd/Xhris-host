@@ -67,6 +67,14 @@ model User {
   loginHistory          LoginHistory[]
   whatsappVerifications WhatsAppVerification[]
   pushSubscriptions     PushSubscription[]
+  taskCompletions       TaskCompletion[]
+  growthShares          GrowthShare[]
+
+  // Growth fields
+  channelJoined     Boolean   @default(false)
+  channelJoinedAt   DateTime?
+  lastLoginAt       DateTime?
+  loginStreak       Int       @default(0)
 
   @@map("users")
 }
@@ -832,6 +840,47 @@ model WhatsAppVerification {
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("whatsapp_verifications")
+}
+
+// ============ GROWTH SYSTEM ============
+model TaskCompletion {
+  id          String   @id @default(uuid())
+  userId      String
+  taskType    String   // 'join_channel', 'daily_login', 'referral', 'share'
+  rewardCoins Int      @default(0)
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([taskType])
+  @@index([userId, taskType, createdAt])
+  @@map("task_completions")
+}
+
+model GrowthShare {
+  id        String   @id @default(uuid())
+  userId    String
+  platform  String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("growth_shares")
+}
+
+model AppSettings {
+  id               String   @id @default("singleton")
+  deployCostCoins  Int      @default(10)
+  dailyLoginBonus  Int      @default(5)
+  joinChannelBonus Int      @default(20)
+  referralBonus    Int      @default(10)
+  shareBonus       Int      @default(5)
+  updatedAt        DateTime @updatedAt
+
+  @@map("app_settings")
 }
 
 // ============ PUSH SUBSCRIPTIONS ============

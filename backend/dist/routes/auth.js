@@ -52,9 +52,15 @@ router.post('/register', async (req, res) => {
             return (0, response_1.sendError)(res, 'Cet email est déjà utilisé', 409);
         const hashedPassword = await bcryptjs_1.default.hash(password, 12);
         const emailVerifyToken = (0, uuid_1.v4)();
+        const refParam = (req.body.ref || req.query.ref || '');
         let referrerId = null;
         if (referralCode) {
             const referrer = await prisma_1.prisma.user.findUnique({ where: { referralCode } });
+            if (referrer)
+                referrerId = referrer.id;
+        }
+        if (!referrerId && refParam) {
+            const referrer = await prisma_1.prisma.user.findUnique({ where: { id: refParam } });
             if (referrer)
                 referrerId = referrer.id;
         }
@@ -64,7 +70,7 @@ router.post('/register', async (req, res) => {
                 email,
                 password: hashedPassword,
                 emailVerifyToken,
-                coins: 10,
+                coins: referrerId ? 15 : 10,
                 referredBy: referrerId || undefined,
             },
         });
@@ -73,12 +79,22 @@ router.post('/register', async (req, res) => {
             user.role = 'SUPERADMIN';
         }
         if (referrerId) {
+            const appSettings = await prisma_1.prisma.appSettings.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+            const bonus = appSettings?.referralBonus || 10;
             await prisma_1.prisma.$transaction([
-                prisma_1.prisma.user.update({ where: { id: referrerId }, data: { coins: { increment: 10 } } }),
+                prisma_1.prisma.user.update({ where: { id: referrerId }, data: { coins: { increment: bonus } } }),
                 prisma_1.prisma.transaction.create({
-                    data: { userId: referrerId, type: 'REFERRAL', description: `Parrainage de ${name}`, amount: 10 }
+                    data: { userId: referrerId, type: 'REFERRAL', description: `Parrainage de ${name}`, amount: bonus }
                 }),
                 prisma_1.prisma.referral.create({ data: { referrerId, referredId: user.id } }),
+                prisma_1.prisma.taskCompletion.create({
+                    data: {
+                        userId: referrerId,
+                        taskType: 'referral',
+                        rewardCoins: bonus,
+                        metadata: JSON.stringify({ referredUserId: user.id }),
+                    },
+                }),
             ]);
         }
         await prisma_1.prisma.transaction.create({

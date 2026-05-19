@@ -10,13 +10,14 @@ import {
   LayoutDashboard, Bot, Server, Share2,
   User, HelpCircle, LogOut, Menu, X, Bell,
   ChevronDown, Zap, Crown, MessageSquare, Code,
-  History, Settings, Wallet, Plus, Languages,
+  History, Settings, Wallet, Plus, Languages, Gift,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 import { coinsApi, notificationsApi, userApi } from '@/lib/api';
 import { SettingsProvider, useSettings } from '@/lib/settingsContext';
 import Footer from '@/components/Footer';
 import PushPrompt from '@/components/PushPrompt';
+import ChannelPopup from '@/components/ChannelPopup';
 import { registerSW } from '@/lib/push';
 
 // ─── SVG Coin Icon ───────────────────────────────────────────────
@@ -62,6 +63,7 @@ const BASE_NAV_ITEMS = [
   { href: '/dashboard/bots',         icon: Bot,             key: 'nav.bots',      devOnly: false },
   { href: '/dashboard/servers',      icon: Server,          key: 'nav.servers',   devOnly: false },
   { href: '/dashboard/coins/share',  icon: Share2,          key: 'nav.share',     devOnly: false },
+  { href: '/dashboard/growth',       icon: Gift,            key: 'Récompenses',   devOnly: false },
   { href: '/dashboard/community',    icon: MessageSquare,   key: 'nav.community', devOnly: false },
   { href: '/developer',              icon: Code,            key: 'Développeur',   devOnly: true },
   { href: '/dashboard/history',      icon: History,         key: 'Historique',    devOnly: false },
@@ -449,6 +451,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         <Footer />
       </div>
       <PushPrompt />
+      <ChannelPopup />
     </div>
   );
 }

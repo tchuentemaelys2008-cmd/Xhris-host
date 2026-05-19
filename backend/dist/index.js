@@ -32,6 +32,7 @@ const notifications_1 = __importDefault(require("./routes/notifications"));
 const support_1 = __importDefault(require("./routes/support"));
 const payments_1 = __importDefault(require("./routes/payments"));
 const admin_1 = __importDefault(require("./routes/admin"));
+const growth_1 = __importDefault(require("./routes/growth"));
 const ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://localhost:3001',
@@ -105,6 +106,7 @@ app.use('/api/api-keys', auth_1.authMiddleware, apiKeys_1.default);
 app.use('/api/webhooks', auth_1.authMiddleware, webhooks_1.default);
 app.use('/api/notifications', auth_1.authMiddleware, notifications_1.default);
 app.use('/api/support', auth_1.authMiddleware, support_1.default);
+app.use('/api/growth', auth_1.authMiddleware, growth_1.default);
 app.use('/api/payments', payments_1.default);
 app.use('/api/admin', auth_1.authMiddleware, admin_1.default);
 app.use('*', (_, res) => res.status(404).json({ success: false, message: 'Route not found' }));

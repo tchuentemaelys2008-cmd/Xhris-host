@@ -868,4 +868,69 @@ router.post('/bots/:id/review', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
+router.get('/app-settings', async (_req, res) => {
+    try {
+        let s = await prisma_1.prisma.appSettings.findUnique({ where: { id: 'singleton' } });
+        if (!s)
+            s = await prisma_1.prisma.appSettings.create({ data: { id: 'singleton' } });
+        (0, response_1.sendSuccess)(res, s);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.patch('/app-settings', async (req, res) => {
+    try {
+        const allowed = ['deployCostCoins', 'dailyLoginBonus', 'joinChannelBonus', 'referralBonus', 'shareBonus'];
+        const data = {};
+        for (const k of allowed) {
+            if (typeof req.body[k] === 'number' && req.body[k] >= 0)
+                data[k] = req.body[k];
+        }
+        if (!Object.keys(data).length)
+            return (0, response_1.sendError)(res, 'Aucune modification valide', 400);
+        const s = await prisma_1.prisma.appSettings.upsert({
+            where: { id: 'singleton' },
+            update: data,
+            create: { id: 'singleton', ...data },
+        });
+        (0, response_1.sendSuccess)(res, s, 'Paramètres mis à jour');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.patch('/marketplace-bots/:id/description', async (req, res) => {
+    try {
+        const { description } = req.body;
+        if (typeof description !== 'string')
+            return (0, response_1.sendError)(res, 'Description manquante', 400);
+        const bot = await prisma_1.prisma.marketplaceBot.update({
+            where: { id: req.params.id },
+            data: { description: description.slice(0, 1000) },
+        });
+        (0, response_1.sendSuccess)(res, bot, 'Description mise à jour');
+    }
+    catch (e) {
+        (0, response_1.sendError)(res, 'Bot introuvable: ' + e.message, 404);
+    }
+});
+router.get('/growth-stats', async (_req, res) => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const last7d = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+        const [totalUsers, newToday, channelJoiners, totalReferrals, tasksLast7d] = await Promise.all([
+            prisma_1.prisma.user.count(),
+            prisma_1.prisma.user.count({ where: { createdAt: { gte: today } } }),
+            prisma_1.prisma.user.count({ where: { channelJoined: true } }),
+            prisma_1.prisma.taskCompletion.count({ where: { taskType: 'referral' } }),
+            prisma_1.prisma.taskCompletion.count({ where: { createdAt: { gte: last7d } } }),
+        ]);
+        (0, response_1.sendSuccess)(res, { totalUsers, newUsersToday: newToday, channelJoiners, totalReferrals, tasksLast7d });
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
 exports.default = router;
