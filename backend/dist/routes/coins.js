@@ -25,6 +25,7 @@ router.get('/packs', async (_req, res) => {
             where: { active: true },
             orderBy: { coins: 'asc' },
         });
+        res.setHeader('Cache-Control', 'no-store');
         (0, response_1.sendSuccess)(res, packs.length > 0 ? packs : credit_packs_1.DEFAULT_CREDIT_PACKS);
     }
     catch (err) {

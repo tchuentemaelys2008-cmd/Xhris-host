@@ -30,6 +30,7 @@ router.get('/packs', async (_req: AuthRequest, res: Response) => {
       where: { active: true },
       orderBy: { coins: 'asc' },
     });
+    res.setHeader('Cache-Control', 'no-store'); // les prix doivent refléter les modifs admin immédiatement
     sendSuccess(res, packs.length > 0 ? packs : DEFAULT_CREDIT_PACKS);
   } catch (err) {
     sendError(res, 'Erreur', 500);

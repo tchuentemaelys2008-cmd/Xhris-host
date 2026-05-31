@@ -347,8 +347,6 @@ function buildPackData(body, partial) {
         data.currency = String(body.currency || 'EUR');
     if (body.bonus !== undefined)
         data.bonus = Math.max(0, Math.round(Number(body.bonus) || 0));
-    if (body.label !== undefined)
-        data.label = body.label ? String(body.label) : null;
     if (body.popular !== undefined)
         data.popular = !!body.popular;
     if (body.bestValue !== undefined)
@@ -369,6 +367,7 @@ router.get('/credit-packs', async (_req, res) => {
     try {
         await (0, credit_packs_1.ensureCreditPacks)(prisma_1.prisma);
         const packs = await prisma_1.prisma.creditPack.findMany({ orderBy: { coins: 'asc' } });
+        res.setHeader('Cache-Control', 'no-store');
         (0, response_1.sendSuccess)(res, packs);
     }
     catch (err) {

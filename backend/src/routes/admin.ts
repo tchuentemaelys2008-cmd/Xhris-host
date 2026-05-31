@@ -304,7 +304,6 @@ function buildPackData(body: any, partial: boolean) {
   if (body.price !== undefined) data.price = Math.max(0, Number(body.price) || 0);
   if (body.currency !== undefined) data.currency = String(body.currency || 'EUR');
   if (body.bonus !== undefined) data.bonus = Math.max(0, Math.round(Number(body.bonus) || 0));
-  if (body.label !== undefined) data.label = body.label ? String(body.label) : null;
   if (body.popular !== undefined) data.popular = !!body.popular;
   if (body.bestValue !== undefined) data.bestValue = !!body.bestValue;
   if (body.active !== undefined) data.active = !!body.active;
@@ -321,6 +320,7 @@ router.get('/credit-packs', async (_req: AuthRequest, res: Response) => {
   try {
     await ensureCreditPacks(prisma);
     const packs = await prisma.creditPack.findMany({ orderBy: { coins: 'asc' } });
+    res.setHeader('Cache-Control', 'no-store'); // évite le 304 qui renvoie une liste vide en cache
     sendSuccess(res, packs);
   } catch (err) { sendError(res, 'Erreur', 500); }
 });

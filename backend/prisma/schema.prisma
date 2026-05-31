@@ -461,7 +461,6 @@ model CreditPack {
   price    Float
   currency String  @default("EUR")
   bonus    Int     @default(0)
-  label    String?
   popular  Boolean @default(false)
   bestValue Boolean @default(false)
   active   Boolean @default(true)
