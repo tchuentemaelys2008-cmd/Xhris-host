@@ -5,6 +5,7 @@ import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import { notify } from '../utils/notify';
 import { sendBotReviewEmail } from '../utils/email';
+import { ensureCreditPacks } from '../utils/credit-packs';
 
 const router = Router();
 router.use(adminMiddleware);
@@ -293,9 +294,32 @@ router.delete('/promo-codes/:id', async (req: AuthRequest, res: Response) => {
   } catch (err) { sendError(res, 'Erreur', 500); }
 });
 
-// ============ CREDIT PACKS ============
+// ============ CREDIT PACKS (passes) ============
+// Construit un objet propre à partir du body : ne garde que les champs connus
+// et convertit les types, pour éviter les erreurs Prisma (champs inconnus, etc.)
+function buildPackData(body: any, partial: boolean) {
+  const data: any = {};
+  if (body.name !== undefined) data.name = String(body.name);
+  if (body.coins !== undefined) data.coins = Math.max(0, Math.round(Number(body.coins) || 0));
+  if (body.price !== undefined) data.price = Math.max(0, Number(body.price) || 0);
+  if (body.currency !== undefined) data.currency = String(body.currency || 'EUR');
+  if (body.bonus !== undefined) data.bonus = Math.max(0, Math.round(Number(body.bonus) || 0));
+  if (body.label !== undefined) data.label = body.label ? String(body.label) : null;
+  if (body.popular !== undefined) data.popular = !!body.popular;
+  if (body.bestValue !== undefined) data.bestValue = !!body.bestValue;
+  if (body.active !== undefined) data.active = !!body.active;
+  // À la création, on impose les champs requis
+  if (!partial) {
+    if (!data.name) data.name = `${data.coins || 0} Coins`;
+    if (data.coins === undefined) data.coins = 0;
+    if (data.price === undefined) data.price = 0;
+  }
+  return data;
+}
+
 router.get('/credit-packs', async (_req: AuthRequest, res: Response) => {
   try {
+    await ensureCreditPacks(prisma);
     const packs = await prisma.creditPack.findMany({ orderBy: { coins: 'asc' } });
     sendSuccess(res, packs);
   } catch (err) { sendError(res, 'Erreur', 500); }
@@ -303,23 +327,29 @@ router.get('/credit-packs', async (_req: AuthRequest, res: Response) => {
 
 router.post('/credit-packs', async (req: AuthRequest, res: Response) => {
   try {
-    const pack = await prisma.creditPack.create({ data: req.body });
+    const data = buildPackData(req.body, false);
+    if (!data.name || !data.coins || data.price === undefined) {
+      return sendError(res, 'Nom, coins et prix sont requis', 400);
+    }
+    const pack = await prisma.creditPack.create({ data });
     sendSuccess(res, pack, 'Pack créé', 201);
-  } catch (err) { sendError(res, 'Erreur', 500); }
+  } catch (err: any) { sendError(res, 'Erreur: ' + (err?.message || ''), 500); }
 });
 
 router.patch('/credit-packs/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const pack = await prisma.creditPack.update({ where: { id: req.params.id }, data: req.body });
+    const data = buildPackData(req.body, true);
+    if (!Object.keys(data).length) return sendError(res, 'Aucune modification valide', 400);
+    const pack = await prisma.creditPack.update({ where: { id: req.params.id }, data });
     sendSuccess(res, pack, 'Pack mis à jour');
-  } catch (err) { sendError(res, 'Erreur', 500); }
+  } catch (err: any) { sendError(res, 'Pack introuvable: ' + (err?.message || ''), 404); }
 });
 
 router.delete('/credit-packs/:id', async (req: AuthRequest, res: Response) => {
   try {
     await prisma.creditPack.delete({ where: { id: req.params.id } });
     sendSuccess(res, null, 'Pack supprimé');
-  } catch (err) { sendError(res, 'Erreur', 500); }
+  } catch (err: any) { sendError(res, 'Pack introuvable: ' + (err?.message || ''), 404); }
 });
 
 // ============ BONUS CODES ============

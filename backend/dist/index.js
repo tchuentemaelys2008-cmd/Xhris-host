@@ -1,4 +1,27 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -33,6 +56,7 @@ const support_1 = __importDefault(require("./routes/support"));
 const payments_1 = __importDefault(require("./routes/payments"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const growth_1 = __importDefault(require("./routes/growth"));
+const gifts_1 = __importDefault(require("./routes/gifts"));
 const ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://localhost:3001',
@@ -105,8 +129,33 @@ app.use('/api/developer', auth_1.authMiddleware, developer_1.default);
 app.use('/api/api-keys', auth_1.authMiddleware, apiKeys_1.default);
 app.use('/api/webhooks', auth_1.authMiddleware, webhooks_1.default);
 app.use('/api/notifications', auth_1.authMiddleware, notifications_1.default);
+app.get('/api/support/testimony/public', async (_req, res) => {
+    try {
+        const { prisma } = await Promise.resolve().then(() => __importStar(require('./utils/prisma')));
+        const testimonies = await prisma.testimony.findMany({
+            where: { approved: true },
+            orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+            take: 50,
+            include: { user: { select: { name: true, avatar: true } } },
+        });
+        const safe = testimonies.map((t) => ({
+            id: t.id,
+            content: t.content,
+            rating: t.rating,
+            featured: t.featured,
+            createdAt: t.createdAt,
+            author: t.user?.name || 'Anonyme',
+            avatar: t.user?.avatar || null,
+        }));
+        res.json({ success: true, data: safe });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: 'Erreur' });
+    }
+});
 app.use('/api/support', auth_1.authMiddleware, support_1.default);
 app.use('/api/growth', auth_1.authMiddleware, growth_1.default);
+app.use('/api/gifts', gifts_1.default);
 app.use('/api/payments', payments_1.default);
 app.use('/api/admin', auth_1.authMiddleware, admin_1.default);
 app.use('*', (_, res) => res.status(404).json({ success: false, message: 'Route not found' }));

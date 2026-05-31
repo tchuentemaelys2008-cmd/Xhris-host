@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import { notify } from '../utils/notify';
+import { ensureCreditPacks, DEFAULT_CREDIT_PACKS } from '../utils/credit-packs';
 
 const router = Router();
 
@@ -22,22 +23,14 @@ router.get('/balance', async (req: AuthRequest, res: Response) => {
 // GET /api/coins/packs
 router.get('/packs', async (_req: AuthRequest, res: Response) => {
   try {
+    // Remplit la table avec les packs par défaut si elle est vide (idempotent),
+    // pour que les prix gérés par l'admin soient la seule source de vérité.
+    await ensureCreditPacks(prisma);
     const packs = await prisma.creditPack.findMany({
       where: { active: true },
       orderBy: { coins: 'asc' },
     });
-
-    // Tarifs accessibles — minimum 500 coins
-    // Prix en EUR, ~655 XAF par EUR (donc 1.99€ ≈ 1300 XAF)
-    const defaultPacks = [
-      { id: 'pack-500',  name: '500 Coins',   coins: 500,  price: 1.99,  currency: 'EUR', label: 'Idéal pour démarrer' },
-      { id: 'pack-1000', name: '1,000 Coins', coins: 1000, price: 3.49,  currency: 'EUR', popular: true, label: 'Le plus populaire' },
-      { id: 'pack-2500', name: '2,500 Coins', coins: 2500, price: 7.99,  currency: 'EUR', label: 'Pour les utilisateurs réguliers' },
-      { id: 'pack-5000', name: '5,000 Coins', coins: 5000, price: 14.99, currency: 'EUR', label: 'Pour les pros' },
-      { id: 'pack-10000', name: '10,000 Coins', coins: 10000, price: 27.99, currency: 'EUR', label: 'Maximum value' },
-    ];
-
-    sendSuccess(res, packs.length > 0 ? packs : defaultPacks);
+    sendSuccess(res, packs.length > 0 ? packs : DEFAULT_CREDIT_PACKS);
   } catch (err) {
     sendError(res, 'Erreur', 500);
   }

@@ -36,6 +36,7 @@ const docker_bots_1 = require("../utils/docker-bots");
 const process_runner_1 = require("../utils/process-runner");
 const logger_1 = require("../utils/logger");
 const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 const bot_log_files_1 = require("../utils/bot-log-files");
 const notify_1 = require("../utils/notify");
 const router = (0, express_1.Router)();
@@ -149,12 +150,24 @@ router.post('/deploy', async (req, res) => {
                 data: { userId: req.user.id, name: `Cle auto - ${botName}`, key: apiKeyValue, permissions: ['read', 'write', 'bots', 'servers', 'coins'] },
             });
         }
+        const apiBaseRaw = (process.env.BACKEND_URL || 'https://api.xhrishost.site').replace(/\/$/, '');
+        const xhrisApiUrl = apiBaseRaw.endsWith('/api') ? apiBaseRaw : `${apiBaseRaw}/api`;
         const mergedEnvVars = addRuntimeEnvAliases({
             ...(envVars || {}),
             XHRIS_API_KEY: apiKeyValue,
-            XHRIS_API_URL: process.env.BACKEND_URL || 'https://api.xhrishost.site/api',
+            XHRIS_API_URL: xhrisApiUrl,
             BOT_NAME: botName,
             XHRIS_DEPLOY_TYPE: marketplaceBotId ? '1click' : 'upload',
+            OWNER_NUMBER: process.env.OWNER_NUMBER || '',
+            ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+            GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+            GROK_API_KEY: process.env.GROK_API_KEY || '',
+            OMDB_API_KEY: process.env.OMDB_API_KEY || '',
+            AUDD_API_KEY: process.env.AUDD_API_KEY || '',
+            OPENWEATHER_KEY: process.env.OPENWEATHER_KEY || '',
+            HF_TOKEN: process.env.HF_TOKEN || '',
+            REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN || '',
         });
         if (marketplaceBotId && marketplaceBot) {
             if (marketplaceBot.githubUrl)
@@ -181,6 +194,11 @@ router.post('/deploy', async (req, res) => {
                 coinsPerDay: deployCost,
             },
         });
+        mergedEnvVars.BOT_ID = bot.id;
+        await prisma_1.prisma.bot.update({
+            where: { id: bot.id },
+            data: { envVars: mergedEnvVars },
+        }).catch(() => { });
         await prisma_1.prisma.$transaction([
             prisma_1.prisma.user.update({ where: { id: req.user.id }, data: { coins: { decrement: deployCost } } }),
             prisma_1.prisma.transaction.create({ data: { userId: req.user.id, type: 'DEPLOY_BOT', description: `Deploiement de ${botName}`, amount: -deployCost } }),
@@ -419,6 +437,101 @@ router.post('/:id/restart', async (req, res) => {
     }
     catch {
         (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.post('/:id/redeploy', async (req, res) => {
+    try {
+        let userId = req.user?.id;
+        if (!userId) {
+            const apiKey = req.headers['x-api-key'];
+            if (!apiKey)
+                return (0, response_1.sendError)(res, 'Auth requise (JWT ou x-api-key)', 401);
+            const key = await prisma_1.prisma.apiKey.findFirst({
+                where: { key: apiKey, status: 'ACTIVE' },
+                select: { userId: true },
+            });
+            if (!key)
+                return (0, response_1.sendError)(res, 'API key invalide', 401);
+            userId = key.userId;
+        }
+        const bot = await prisma_1.prisma.bot.findFirst({ where: { id: req.params.id, userId } });
+        if (!bot)
+            return (0, response_1.sendError)(res, 'Bot non trouve', 404);
+        await prisma_1.prisma.bot.update({
+            where: { id: bot.id },
+            data: { status: 'STARTING', restarts: { increment: 1 } },
+        });
+        const existingEnv = bot.envVars || {};
+        const mergedEnv = addRuntimeEnvAliases({
+            ...existingEnv,
+            BOT_ID: bot.id,
+        });
+        if (exports.DOCKER_AVAILABLE) {
+            try {
+                await (0, docker_bots_1.deleteBotContainer)(bot.id);
+            }
+            catch (e) {
+                logger_1.logger.error(`[redeploy ${bot.id}] cleanup container: ${e?.message || 'unknown'}`);
+            }
+        }
+        else {
+            try {
+                await (0, process_runner_1.stopBotNative)(bot.id);
+            }
+            catch { }
+            try {
+                await (0, process_runner_1.deleteBotNative)(bot.id);
+            }
+            catch { }
+        }
+        try {
+            const workDir = path_1.default.join('/tmp/xhris-bots', bot.id);
+            if (fs_1.default.existsSync(workDir)) {
+                fs_1.default.rmSync(workDir, { recursive: true, force: true });
+            }
+        }
+        catch (e) {
+            logger_1.logger.error(`[redeploy ${bot.id}] cleanup workdir: ${e?.message || 'unknown'}`);
+        }
+        if (exports.DOCKER_AVAILABLE) {
+            (0, docker_bots_1.deployBotContainer)(bot.id, bot.platform, mergedEnv)
+                .then(async () => {
+                await prisma_1.prisma.bot.update({ where: { id: bot.id }, data: { status: 'RUNNING' } }).catch(() => { });
+            })
+                .catch(async (e) => {
+                logger_1.logger.error(`[redeploy ${bot.id}] failed: ${e?.message || 'unknown'}`);
+                await prisma_1.prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => { });
+            });
+        }
+        else {
+            (0, process_runner_1.deployBotNative)(bot.id, bot.platform, mergedEnv, async () => {
+                await prisma_1.prisma.bot.update({
+                    where: { id: bot.id },
+                    data: { status: 'RUNNING', logs: (0, bot_log_files_1.readBotLogLines)(bot.id, 100) },
+                }).catch(() => { });
+            }, async (code) => {
+                if (code === 0)
+                    return;
+                await prisma_1.prisma.bot.update({
+                    where: { id: bot.id },
+                    data: { status: 'ERROR', logs: (0, bot_log_files_1.readBotLogLines)(bot.id, 100) },
+                }).catch(() => { });
+            })
+                .then(async (pid) => {
+                await prisma_1.prisma.bot.update({
+                    where: { id: bot.id },
+                    data: { processId: pid, logs: (0, bot_log_files_1.readBotLogLines)(bot.id, 50) },
+                }).catch(() => { });
+            })
+                .catch(async () => {
+                await prisma_1.prisma.bot.update({ where: { id: bot.id }, data: { status: 'ERROR' } }).catch(() => { });
+            });
+        }
+        (0, response_1.sendSuccess)(res, { botId: bot.id }, 'Redeploiement initie - le bot revient dans 2-3 min');
+    }
+    catch (err) {
+        logger_1.logger.error(`[redeploy] error: ${err?.message || 'unknown'}`);
+        (0, response_1.sendError)(res, 'Erreur lors du redeploiement', 500);
     }
 });
 router.delete('/:id', async (req, res) => {

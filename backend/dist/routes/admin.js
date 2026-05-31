@@ -10,6 +10,7 @@ const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
 const notify_1 = require("../utils/notify");
 const email_1 = require("../utils/email");
+const credit_packs_1 = require("../utils/credit-packs");
 const router = (0, express_1.Router)();
 router.use(auth_1.adminMiddleware);
 router.get('/stats', async (_req, res) => {
@@ -334,8 +335,39 @@ router.delete('/promo-codes/:id', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });
+function buildPackData(body, partial) {
+    const data = {};
+    if (body.name !== undefined)
+        data.name = String(body.name);
+    if (body.coins !== undefined)
+        data.coins = Math.max(0, Math.round(Number(body.coins) || 0));
+    if (body.price !== undefined)
+        data.price = Math.max(0, Number(body.price) || 0);
+    if (body.currency !== undefined)
+        data.currency = String(body.currency || 'EUR');
+    if (body.bonus !== undefined)
+        data.bonus = Math.max(0, Math.round(Number(body.bonus) || 0));
+    if (body.label !== undefined)
+        data.label = body.label ? String(body.label) : null;
+    if (body.popular !== undefined)
+        data.popular = !!body.popular;
+    if (body.bestValue !== undefined)
+        data.bestValue = !!body.bestValue;
+    if (body.active !== undefined)
+        data.active = !!body.active;
+    if (!partial) {
+        if (!data.name)
+            data.name = `${data.coins || 0} Coins`;
+        if (data.coins === undefined)
+            data.coins = 0;
+        if (data.price === undefined)
+            data.price = 0;
+    }
+    return data;
+}
 router.get('/credit-packs', async (_req, res) => {
     try {
+        await (0, credit_packs_1.ensureCreditPacks)(prisma_1.prisma);
         const packs = await prisma_1.prisma.creditPack.findMany({ orderBy: { coins: 'asc' } });
         (0, response_1.sendSuccess)(res, packs);
     }
@@ -345,20 +377,27 @@ router.get('/credit-packs', async (_req, res) => {
 });
 router.post('/credit-packs', async (req, res) => {
     try {
-        const pack = await prisma_1.prisma.creditPack.create({ data: req.body });
+        const data = buildPackData(req.body, false);
+        if (!data.name || !data.coins || data.price === undefined) {
+            return (0, response_1.sendError)(res, 'Nom, coins et prix sont requis', 400);
+        }
+        const pack = await prisma_1.prisma.creditPack.create({ data });
         (0, response_1.sendSuccess)(res, pack, 'Pack créé', 201);
     }
     catch (err) {
-        (0, response_1.sendError)(res, 'Erreur', 500);
+        (0, response_1.sendError)(res, 'Erreur: ' + (err?.message || ''), 500);
     }
 });
 router.patch('/credit-packs/:id', async (req, res) => {
     try {
-        const pack = await prisma_1.prisma.creditPack.update({ where: { id: req.params.id }, data: req.body });
+        const data = buildPackData(req.body, true);
+        if (!Object.keys(data).length)
+            return (0, response_1.sendError)(res, 'Aucune modification valide', 400);
+        const pack = await prisma_1.prisma.creditPack.update({ where: { id: req.params.id }, data });
         (0, response_1.sendSuccess)(res, pack, 'Pack mis à jour');
     }
     catch (err) {
-        (0, response_1.sendError)(res, 'Erreur', 500);
+        (0, response_1.sendError)(res, 'Pack introuvable: ' + (err?.message || ''), 404);
     }
 });
 router.delete('/credit-packs/:id', async (req, res) => {
@@ -367,7 +406,7 @@ router.delete('/credit-packs/:id', async (req, res) => {
         (0, response_1.sendSuccess)(res, null, 'Pack supprimé');
     }
     catch (err) {
-        (0, response_1.sendError)(res, 'Erreur', 500);
+        (0, response_1.sendError)(res, 'Pack introuvable: ' + (err?.message || ''), 404);
     }
 });
 router.get('/bonus-codes', async (_req, res) => {
@@ -866,6 +905,106 @@ router.post('/bots/:id/review', async (req, res) => {
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+function generateGiftCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const part = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return `XMD-${part}`;
+}
+router.post('/gifts', async (req, res) => {
+    try {
+        const { title, description, mainReward, consolationReward, winnersLimit, totalCapacity, expiresAt, requireChannelJoin, distributionMode } = req.body;
+        if (typeof mainReward !== 'number' || mainReward <= 0)
+            return (0, response_1.sendError)(res, 'mainReward invalide', 400);
+        if (typeof winnersLimit !== 'number' || winnersLimit < 1)
+            return (0, response_1.sendError)(res, 'winnersLimit invalide', 400);
+        if (!expiresAt)
+            return (0, response_1.sendError)(res, 'expiresAt requis', 400);
+        const expiresDate = new Date(expiresAt);
+        if (isNaN(expiresDate.getTime()) || expiresDate <= new Date())
+            return (0, response_1.sendError)(res, 'expiresAt doit être une date future', 400);
+        if (!['site', 'channel'].includes(distributionMode))
+            return (0, response_1.sendError)(res, 'distributionMode invalide (site|channel)', 400);
+        const cap = totalCapacity || winnersLimit * 10;
+        if (cap < winnersLimit)
+            return (0, response_1.sendError)(res, 'totalCapacity doit être >= winnersLimit', 400);
+        let code = '';
+        for (let i = 0; i < 5; i++) {
+            code = generateGiftCode();
+            const exists = await prisma_1.prisma.giftDrop.findUnique({ where: { code } });
+            if (!exists)
+                break;
+            if (i === 4)
+                return (0, response_1.sendError)(res, 'Erreur génération code', 500);
+        }
+        const gift = await prisma_1.prisma.giftDrop.create({
+            data: {
+                code, title: title || 'Cadeau XHRIS-MD', description: description || null,
+                mainReward, consolationReward: consolationReward || 0,
+                winnersLimit, totalCapacity: cap, expiresAt: expiresDate,
+                requireChannelJoin: requireChannelJoin !== false,
+                distributionMode, createdBy: req.user.id,
+            },
+        });
+        const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+        (0, response_1.sendSuccess)(res, { ...gift, link: `${frontendUrl}/gift/${gift.id}` }, 'Cadeau créé');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur: ' + err.message, 500);
+    }
+});
+router.get('/gifts', async (_req, res) => {
+    try {
+        const gifts = await prisma_1.prisma.giftDrop.findMany({
+            orderBy: { createdAt: 'desc' },
+            include: { _count: { select: { claims: true } } },
+        });
+        const frontendUrl = process.env.FRONTEND_URL || 'https://xhrishost.site';
+        (0, response_1.sendSuccess)(res, gifts.map((g) => ({
+            ...g,
+            link: `${frontendUrl}/gift/${g.id}`,
+            claimsCount: g._count?.claims || 0,
+            isExpired: new Date(g.expiresAt) <= new Date(),
+            isFull: (g._count?.claims || 0) >= g.totalCapacity,
+        })));
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.get('/gifts/:id/claims', async (req, res) => {
+    try {
+        const claims = await prisma_1.prisma.giftClaim.findMany({
+            where: { giftDropId: req.params.id },
+            orderBy: { position: 'asc' },
+            include: { user: { select: { id: true, name: true, email: true, avatar: true } } },
+        });
+        (0, response_1.sendSuccess)(res, claims);
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.patch('/gifts/:id/toggle', async (req, res) => {
+    try {
+        const g = await prisma_1.prisma.giftDrop.findUnique({ where: { id: req.params.id } });
+        if (!g)
+            return (0, response_1.sendError)(res, 'Cadeau introuvable', 404);
+        const updated = await prisma_1.prisma.giftDrop.update({ where: { id: req.params.id }, data: { active: !g.active } });
+        (0, response_1.sendSuccess)(res, updated, `Cadeau ${updated.active ? 'activé' : 'désactivé'}`);
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+router.delete('/gifts/:id', async (req, res) => {
+    try {
+        await prisma_1.prisma.giftDrop.delete({ where: { id: req.params.id } });
+        (0, response_1.sendSuccess)(res, null, 'Cadeau supprimé');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur: ' + err.message, 500);
     }
 });
 router.get('/app-settings', async (_req, res) => {

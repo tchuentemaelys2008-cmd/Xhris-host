@@ -567,42 +567,92 @@ exports.paymentsRouter.post('/initiate', auth_1.authMiddleware, async (req, res)
 exports.paymentsRouter.post('/fapshi/initiate', auth_1.authMiddleware, async (req, res) => {
     try {
         const { packId, coins, amount, phone } = req.body;
-        if (!packId || !coins || !amount || !phone)
-            return (0, response_1.sendError)(res, 'Paramètres manquants', 400);
+        if (!packId || !coins || !amount) {
+            return (0, response_1.sendError)(res, 'Paramètres manquants (packId, coins, amount requis)', 400);
+        }
         const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
         const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
-        const amountXAF = Math.round(amount * 655);
+        const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
+            ? 'https://sandbox.fapshi.com'
+            : 'https://live.fapshi.com';
+        const amountXAF = Math.max(100, Math.round(Number(amount) * 655));
         const reference = `XH-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        const APP_URL = (process.env.FRONTEND_URL || 'https://xhrishost.site').replace(/\/$/, '');
+        const API_URL = (process.env.BACKEND_URL || 'https://api.xhrishost.site').replace(/\/$/, '');
+        const redirectUrl = `${APP_URL}/dashboard/coins/buy?success=1&ref=${reference}`;
+        const webhookUrl = `${API_URL}/api/payments/fapshi/webhook`;
         await prisma_1.prisma.payment.create({
             data: { userId: req.user.id, amount, method: 'FAPSHI', reference, packId, status: 'PENDING' },
         });
-        if (FAPSHI_API_KEY && FAPSHI_API_USER) {
-            const fapshiRes = await fetch('https://live.fapshi.com/initiate-pay', {
+        if (!FAPSHI_API_KEY || !FAPSHI_API_USER) {
+            console.error('[Fapshi] Clés API manquantes (FAPSHI_API_KEY / FAPSHI_API_USER)');
+            return (0, response_1.sendError)(res, 'Paiement Fapshi non configuré côté serveur. Contactez l\'administrateur.', 500);
+        }
+        const fapshiPayload = {
+            amount: amountXAF,
+            message: `XHRIS Host - ${coins} Coins (${packId})`,
+            externalId: reference,
+            redirectUrl,
+            webhookUrl,
+            email: req.user.email || undefined,
+            userId: req.user.id,
+        };
+        if (phone && String(phone).trim()) {
+            fapshiPayload.phone = String(phone).replace(/\s/g, '').replace(/^\+/, '');
+        }
+        let fapshiStatus = 0;
+        let rawText = '';
+        try {
+            const r = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                     'apiuser': FAPSHI_API_USER,
                     'apikey': FAPSHI_API_KEY,
                 },
-                body: JSON.stringify({
-                    amount: amountXAF,
-                    phone: phone.replace(/\s/g, '').replace(/^\+/, ''),
-                    message: `XHRIS Host - ${coins} Coins (${packId})`,
-                    externalId: reference,
-                    redirectUrl: `${process.env.FRONTEND_URL || 'https://xhris-host-frontend.vercel.app'}/dashboard/coins/buy?success=1`,
-                }),
+                body: JSON.stringify(fapshiPayload),
             });
-            const fapshiData = await fapshiRes.json();
-            if (!fapshiRes.ok)
-                return (0, response_1.sendError)(res, fapshiData?.message || 'Erreur Fapshi', 400);
-            (0, response_1.sendSuccess)(res, { reference, link: fapshiData?.link }, 'Paiement Fapshi initié');
+            fapshiStatus = r.status;
+            rawText = await r.text();
         }
-        else {
-            (0, response_1.sendSuccess)(res, { reference, link: null }, 'Paiement en attente de configuration Fapshi');
+        catch (e) {
+            console.error('[Fapshi] Erreur réseau:', e?.message);
+            await prisma_1.prisma.payment.update({
+                where: { reference }, data: { status: 'FAILED' },
+            }).catch(() => { });
+            return (0, response_1.sendError)(res, 'Service de paiement Fapshi injoignable. Réessayez.', 502);
         }
+        let fapshiData = null;
+        try {
+            fapshiData = rawText ? JSON.parse(rawText) : null;
+        }
+        catch {
+            fapshiData = { raw: rawText };
+        }
+        if (fapshiStatus < 200 || fapshiStatus >= 300) {
+            console.error('[Fapshi] Réponse non-OK:', fapshiStatus, fapshiData);
+            await prisma_1.prisma.payment.update({
+                where: { reference }, data: { status: 'FAILED' },
+            }).catch(() => { });
+            return (0, response_1.sendError)(res, fapshiData?.message || `Erreur Fapshi (${fapshiStatus})`, 400);
+        }
+        const link = fapshiData?.link;
+        const transId = fapshiData?.transId;
+        if (!link) {
+            console.error('[Fapshi] Pas de "link" dans la réponse:', fapshiData);
+            return (0, response_1.sendError)(res, 'Réponse Fapshi invalide (pas de lien de paiement)', 502);
+        }
+        return (0, response_1.sendSuccess)(res, {
+            reference,
+            link,
+            paymentUrl: link,
+            transId: transId || null,
+        }, 'Paiement Fapshi initié');
     }
     catch (err) {
-        (0, response_1.sendError)(res, 'Erreur lors de l\'initiation Fapshi', 500);
+        console.error('[Fapshi initiate] erreur:', err?.message);
+        return (0, response_1.sendError)(res, 'Erreur lors de l\'initiation Fapshi', 500);
     }
 });
 exports.paymentsRouter.post('/geniuspay/initiate', auth_1.authMiddleware, async (req, res) => {
@@ -654,65 +704,102 @@ exports.paymentsRouter.post('/geniuspay/initiate', auth_1.authMiddleware, async 
 });
 exports.paymentsRouter.post('/fapshi/webhook', async (req, res) => {
     try {
-        const { transId, status, externalId } = req.body;
-        if (!externalId)
+        const { transId, status, externalId } = req.body || {};
+        console.log('[Fapshi webhook] reçu:', { transId, status, externalId });
+        if (!transId && !externalId) {
             return res.json({ success: true });
+        }
         const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
         const FAPSHI_API_USER = process.env.FAPSHI_API_USER || '';
+        const FAPSHI_BASE_URL = process.env.FAPSHI_MODE === 'sandbox'
+            ? 'https://sandbox.fapshi.com'
+            : 'https://live.fapshi.com';
         let paymentStatus = status;
+        let verifiedData = null;
         if (FAPSHI_API_KEY && FAPSHI_API_USER && transId) {
             try {
-                const verifyRes = await fetch(`https://live.fapshi.com/payment-status/${transId}`, {
+                const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
                     headers: { apiuser: FAPSHI_API_USER, apikey: FAPSHI_API_KEY },
                 });
-                const d = await verifyRes.json();
-                paymentStatus = d?.status || status;
+                verifiedData = await verifyRes.json();
+                paymentStatus = verifiedData?.status || status;
+                console.log('[Fapshi webhook] statut vérifié:', paymentStatus);
             }
-            catch { }
+            catch (e) {
+                console.error('[Fapshi webhook] échec vérification:', e?.message);
+            }
+        }
+        const ref = externalId || verifiedData?.externalId;
+        if (!ref) {
+            console.error('[Fapshi webhook] pas de référence');
+            return res.json({ success: true });
         }
         if (paymentStatus === 'SUCCESSFUL') {
-            const payment = await prisma_1.prisma.payment.findUnique({ where: { reference: externalId } });
-            if (payment && payment.status === 'PENDING') {
-                const pack = payment.packId
-                    ? await prisma_1.prisma.creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
-                    : null;
-                const coins = pack ? (pack.coins + (pack.bonus || 0)) : Math.floor((payment.amount || 0) * 10);
-                await prisma_1.prisma.$transaction([
-                    prisma_1.prisma.payment.update({ where: { reference: externalId }, data: { status: 'COMPLETED' } }),
-                    ...(coins > 0 ? [
-                        prisma_1.prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
-                        prisma_1.prisma.transaction.create({
-                            data: {
-                                userId: payment.userId,
-                                type: 'PURCHASE',
-                                amount: coins,
-                                description: `Achat ${coins} coins via Fapshi Mobile Money`,
-                                reference: externalId,
-                            },
-                        }),
-                    ] : []),
-                ]);
-                if (coins > 0) {
-                    await (0, notify_1.notify)(payment.userId, {
-                        title: '💰 Paiement reçu !',
-                        message: `${coins} coins ont été crédités à votre compte.`,
-                        type: 'PAYMENT',
-                        link: '/dashboard/coins',
-                    });
-                }
+            const payment = await prisma_1.prisma.payment.findUnique({ where: { reference: ref } });
+            if (!payment) {
+                console.error('[Fapshi webhook] payment introuvable:', ref);
+                return res.json({ success: true });
             }
+            if (payment.status === 'COMPLETED') {
+                return res.json({ success: true, alreadyProcessed: true });
+            }
+            const pack = payment.packId
+                ? await prisma_1.prisma.creditPack.findUnique({ where: { id: payment.packId } }).catch(() => null)
+                : null;
+            const HARDCODED = {
+                'pack-500': { coins: 500, bonus: 0 },
+                'pack-1000': { coins: 1000, bonus: 100 },
+                'pack-2500': { coins: 2500, bonus: 300 },
+                'pack-5000': { coins: 5000, bonus: 700 },
+                'pack-10000': { coins: 10000, bonus: 1500 },
+            };
+            const hc = payment.packId ? HARDCODED[payment.packId] : null;
+            const coins = pack
+                ? (pack.coins + (pack.bonus || 0))
+                : hc
+                    ? (hc.coins + hc.bonus)
+                    : Math.floor((payment.amount || 0) * 10);
+            await prisma_1.prisma.$transaction([
+                prisma_1.prisma.payment.update({ where: { reference: ref }, data: { status: 'COMPLETED' } }),
+                ...(coins > 0 ? [
+                    prisma_1.prisma.user.update({ where: { id: payment.userId }, data: { coins: { increment: coins } } }),
+                    prisma_1.prisma.transaction.create({
+                        data: {
+                            userId: payment.userId,
+                            type: 'PURCHASE',
+                            amount: coins,
+                            description: `Achat ${coins} coins via Fapshi Mobile Money`,
+                            reference: ref,
+                        },
+                    }),
+                ] : []),
+            ]);
+            if (coins > 0) {
+                await (0, notify_1.notify)(payment.userId, {
+                    title: '💰 Paiement reçu !',
+                    message: `${coins} coins ont été crédités à votre compte.`,
+                    type: 'PAYMENT',
+                    link: '/dashboard/coins',
+                }).catch(() => { });
+            }
+            console.log('[Fapshi webhook] paiement complété:', ref, `+${coins} coins`);
         }
-        else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
+        else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED' || paymentStatus === 'EXPIRED') {
             await prisma_1.prisma.payment.updateMany({
-                where: { reference: externalId, status: 'PENDING' },
+                where: { reference: ref, status: 'PENDING' },
                 data: { status: 'FAILED' },
             });
+            console.log('[Fapshi webhook] paiement échoué:', ref, paymentStatus);
         }
         res.json({ success: true });
     }
-    catch {
+    catch (e) {
+        console.error('[Fapshi webhook] erreur:', e?.message);
         res.status(500).json({ success: false });
     }
+});
+exports.paymentsRouter.get('/fapshi/webhook', async (_req, res) => {
+    res.json({ ok: true, message: 'XHRIS Host Fapshi webhook endpoint' });
 });
 exports.paymentsRouter.get('/fapshi/verify/:reference', async (req, res) => {
     try {
@@ -807,6 +894,166 @@ exports.paymentsRouter.get('/withdrawals', auth_1.authMiddleware, async (req, re
         (0, response_1.sendSuccess)(res, withdrawals);
     }
     catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+async function resolveTestimonyUser(req) {
+    if (req.user?.id) {
+        const u = await prisma_1.prisma.user.findUnique({ where: { id: req.user.id } });
+        return { userId: req.user.id, isAdmin: !!u?.isAdmin };
+    }
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey) {
+        const key = await prisma_1.prisma.apiKey.findFirst({
+            where: { key: apiKey, status: 'ACTIVE' },
+        });
+        if (key) {
+            const u = await prisma_1.prisma.user.findUnique({ where: { id: key.userId } });
+            return { userId: key.userId, isAdmin: !!u?.isAdmin };
+        }
+    }
+    return null;
+}
+exports.supportRouter.post('/testimony', async (req, res) => {
+    try {
+        const auth = await resolveTestimonyUser(req);
+        if (!auth)
+            return (0, response_1.sendError)(res, 'Auth requise', 401);
+        const { content, rating } = req.body || {};
+        if (!content || typeof content !== 'string') {
+            return (0, response_1.sendError)(res, 'Contenu requis', 400);
+        }
+        const trimmed = content.trim();
+        if (trimmed.length < 10)
+            return (0, response_1.sendError)(res, 'Temoignage trop court (min 10 caracteres)', 400);
+        if (trimmed.length > 1000)
+            return (0, response_1.sendError)(res, 'Temoignage trop long (max 1000 caracteres)', 400);
+        const ratingNum = Number(rating);
+        const safeRating = (!isNaN(ratingNum) && ratingNum >= 1 && ratingNum <= 5) ? Math.round(ratingNum) : 5;
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const existing = await prisma_1.prisma.testimony.findFirst({
+            where: { userId: auth.userId, createdAt: { gte: todayStart } },
+        });
+        if (existing)
+            return (0, response_1.sendError)(res, 'Vous avez deja soumis un temoignage aujourd\'hui', 429);
+        const testimony = await prisma_1.prisma.testimony.create({
+            data: {
+                userId: auth.userId,
+                content: trimmed,
+                rating: safeRating,
+                approved: false,
+            },
+        });
+        await prisma_1.prisma.$transaction([
+            prisma_1.prisma.user.update({ where: { id: auth.userId }, data: { coins: { increment: 5 } } }),
+            prisma_1.prisma.transaction.create({
+                data: {
+                    userId: auth.userId,
+                    type: 'BONUS_CODE',
+                    amount: 5,
+                    description: 'Temoignage soumis (+5 coins)',
+                },
+            }),
+        ]).catch(() => { });
+        (0, response_1.sendSuccess)(res, { id: testimony.id }, 'Temoignage soumis. Il apparaitra apres validation.');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur lors de la soumission', 500);
+    }
+});
+exports.supportRouter.get('/testimony/public', async (_req, res) => {
+    try {
+        const testimonies = await prisma_1.prisma.testimony.findMany({
+            where: { approved: true },
+            orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+            take: 50,
+            include: {
+                user: { select: { name: true, avatar: true } },
+            },
+        });
+        const safe = testimonies.map(t => ({
+            id: t.id,
+            content: t.content,
+            rating: t.rating,
+            featured: t.featured,
+            createdAt: t.createdAt,
+            author: t.user?.name || 'Anonyme',
+            avatar: t.user?.avatar || null,
+        }));
+        (0, response_1.sendSuccess)(res, safe);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.supportRouter.get('/testimony/mine', async (req, res) => {
+    try {
+        const auth = await resolveTestimonyUser(req);
+        if (!auth)
+            return (0, response_1.sendError)(res, 'Auth requise', 401);
+        const list = await prisma_1.prisma.testimony.findMany({
+            where: { userId: auth.userId },
+            orderBy: { createdAt: 'desc' },
+        });
+        (0, response_1.sendSuccess)(res, list);
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.supportRouter.get('/testimony/admin', async (req, res) => {
+    try {
+        const auth = await resolveTestimonyUser(req);
+        if (!auth?.isAdmin)
+            return (0, response_1.sendError)(res, 'Acces admin requis', 403);
+        const list = await prisma_1.prisma.testimony.findMany({
+            orderBy: [{ approved: 'asc' }, { createdAt: 'desc' }],
+            include: {
+                user: { select: { id: true, name: true, email: true } },
+            },
+        });
+        (0, response_1.sendSuccess)(res, list);
+    }
+    catch {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
+exports.supportRouter.patch('/testimony/:id', async (req, res) => {
+    try {
+        const auth = await resolveTestimonyUser(req);
+        if (!auth?.isAdmin)
+            return (0, response_1.sendError)(res, 'Acces admin requis', 403);
+        const { approved, featured } = req.body || {};
+        const data = {};
+        if (typeof approved === 'boolean')
+            data.approved = approved;
+        if (typeof featured === 'boolean')
+            data.featured = featured;
+        if (!Object.keys(data).length)
+            return (0, response_1.sendError)(res, 'Aucun changement', 400);
+        const t = await prisma_1.prisma.testimony.update({ where: { id: req.params.id }, data });
+        (0, response_1.sendSuccess)(res, t, 'Temoignage mis a jour');
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur: ' + (err?.message || 'inconnue'), 500);
+    }
+});
+exports.supportRouter.delete('/testimony/:id', async (req, res) => {
+    try {
+        const auth = await resolveTestimonyUser(req);
+        if (!auth)
+            return (0, response_1.sendError)(res, 'Auth requise', 401);
+        const t = await prisma_1.prisma.testimony.findUnique({ where: { id: req.params.id } });
+        if (!t)
+            return (0, response_1.sendError)(res, 'Temoignage introuvable', 404);
+        if (t.userId !== auth.userId && !auth.isAdmin) {
+            return (0, response_1.sendError)(res, 'Permission refusee', 403);
+        }
+        await prisma_1.prisma.testimony.delete({ where: { id: req.params.id } });
+        (0, response_1.sendSuccess)(res, null, 'Temoignage supprime');
+    }
+    catch {
         (0, response_1.sendError)(res, 'Erreur', 500);
     }
 });

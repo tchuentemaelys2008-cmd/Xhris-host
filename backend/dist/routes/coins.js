@@ -4,6 +4,7 @@ const express_1 = require("express");
 const prisma_1 = require("../utils/prisma");
 const response_1 = require("../utils/response");
 const notify_1 = require("../utils/notify");
+const credit_packs_1 = require("../utils/credit-packs");
 const router = (0, express_1.Router)();
 router.get('/balance', async (req, res) => {
     try {
@@ -19,18 +20,12 @@ router.get('/balance', async (req, res) => {
 });
 router.get('/packs', async (_req, res) => {
     try {
+        await (0, credit_packs_1.ensureCreditPacks)(prisma_1.prisma);
         const packs = await prisma_1.prisma.creditPack.findMany({
             where: { active: true },
             orderBy: { coins: 'asc' },
         });
-        const defaultPacks = [
-            { id: 'pack-100', name: '100 Coins', coins: 100, price: 2.49, currency: 'EUR', label: 'Idéal pour commencer' },
-            { id: 'pack-250', name: '250 Coins', coins: 250, price: 4.99, currency: 'EUR', label: 'Parfait pour les petits projets' },
-            { id: 'pack-500', name: '500 Coins', coins: 500, price: 9.99, currency: 'EUR', popular: true, label: 'Le plus populaire' },
-            { id: 'pack-1000', name: '1,000 Coins', coins: 1000, price: 17.99, currency: 'EUR', label: 'Pour les utilisateurs réguliers' },
-            { id: 'pack-2500', name: '2,500 Coins', coins: 2500, price: 39.99, currency: 'EUR', label: 'Pour les pros' },
-        ];
-        (0, response_1.sendSuccess)(res, packs.length > 0 ? packs : defaultPacks);
+        (0, response_1.sendSuccess)(res, packs.length > 0 ? packs : credit_packs_1.DEFAULT_CREDIT_PACKS);
     }
     catch (err) {
         (0, response_1.sendError)(res, 'Erreur', 500);
@@ -44,11 +39,11 @@ router.post('/purchase', async (req, res) => {
         let pack = await prisma_1.prisma.creditPack.findUnique({ where: { id: packId } }).catch(() => null);
         if (!pack) {
             const defaults = {
-                'pack-100': { coins: 100, bonus: 0, price: 2.49 },
-                'pack-250': { coins: 250, bonus: 0, price: 4.99 },
-                'pack-500': { coins: 500, bonus: 50, price: 9.99 },
-                'pack-1000': { coins: 1000, bonus: 100, price: 17.99 },
-                'pack-2500': { coins: 2500, bonus: 500, price: 39.99 },
+                'pack-500': { coins: 500, bonus: 0, price: 1.99 },
+                'pack-1000': { coins: 1000, bonus: 100, price: 3.49 },
+                'pack-2500': { coins: 2500, bonus: 300, price: 7.99 },
+                'pack-5000': { coins: 5000, bonus: 700, price: 14.99 },
+                'pack-10000': { coins: 10000, bonus: 1500, price: 27.99 },
             };
             pack = defaults[packId];
         }
@@ -118,6 +113,25 @@ router.post('/transfer', async (req, res) => {
         (0, response_1.sendError)(res, 'Erreur lors du transfert', 500);
     }
 });
+router.get('/lookup/:userId', async (req, res) => {
+    try {
+        const userId = String(req.params.userId || '').trim();
+        if (!userId)
+            return (0, response_1.sendError)(res, 'ID requis', 400);
+        if (userId === req.user.id)
+            return (0, response_1.sendError)(res, 'C\'est vous-même', 400);
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, email: true, plan: true, avatar: true },
+        });
+        if (!user)
+            return (0, response_1.sendError)(res, 'Utilisateur introuvable', 404);
+        (0, response_1.sendSuccess)(res, user);
+    }
+    catch (err) {
+        (0, response_1.sendError)(res, 'Erreur', 500);
+    }
+});
 router.post('/daily-bonus', async (req, res) => {
     try {
         const today = new Date();
@@ -127,7 +141,7 @@ router.post('/daily-bonus', async (req, res) => {
         });
         if (existing)
             return (0, response_1.sendError)(res, 'Bonus quotidien déjà réclamé', 400);
-        const bonusAmount = 3;
+        const bonusAmount = 5;
         await prisma_1.prisma.$transaction([
             prisma_1.prisma.user.update({ where: { id: req.user.id }, data: { coins: { increment: bonusAmount } } }),
             prisma_1.prisma.transaction.create({ data: { userId: req.user.id, type: 'DAILY_BONUS', description: 'Récompense quotidienne', amount: bonusAmount } }),

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import {
@@ -9,7 +9,7 @@ import {
   Smartphone, Upload, X, ExternalLink, Send, Clock, ChevronDown,
 } from 'lucide-react';
 import { useCoinsBalance, useInvalidateBalance } from '@/lib/useCoinsBalance';
-import { apiClient } from '@/lib/api';
+import { apiClient, coinsApi } from '@/lib/api';
 import { COIN_PACKS } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -94,6 +94,17 @@ export default function BuyCoinsPage() {
   const [currency, setCurrency] = useState(CURRENCIES[0]);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Packs gérés par l'admin (table credit_packs). Repli sur les packs codés en
+  // dur si l'API ne répond pas ou ne renvoie rien.
+  const { data: packsResp } = useQuery({
+    queryKey: ['coin-packs'],
+    queryFn: () => coinsApi.getPacks(),
+  });
+  const packs: any[] = (() => {
+    const d = (packsResp as any)?.data?.data;
+    return Array.isArray(d) && d.length > 0 ? d : COIN_PACKS;
+  })();
 
   // Fapshi: automatic API payment
   const fapshiMutation = useMutation({
@@ -247,7 +258,7 @@ export default function BuyCoinsPage() {
       {step === 'packs' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {COIN_PACKS.map(pack => (
+            {packs.map(pack => (
               <motion.button key={pack.id} onClick={() => setSelectedPack(pack)}
                 whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
                 className={`relative bg-[#111118] border-2 rounded-xl p-5 text-left transition-all ${
