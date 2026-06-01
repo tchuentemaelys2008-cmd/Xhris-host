@@ -727,7 +727,7 @@ router.get('/marketplace-bots/:id', async (req: AuthRequest, res: Response) => {
 // PATCH /admin/marketplace-bots/:id — admin édite les infos du bot (sessionUrl, githubUrl, etc.)
 router.patch('/marketplace-bots/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const { sessionUrl, githubUrl, demoUrl, envTemplate, coinsPerDay } = req.body;
+    const { sessionUrl, githubUrl, demoUrl, envTemplate, coinsPerDay, isFree } = req.body;
     const bot = await prisma.marketplaceBot.findUnique({ where: { id: req.params.id } });
     if (!bot) return sendError(res, 'Bot non trouvé', 404);
 
@@ -738,6 +738,7 @@ router.patch('/marketplace-bots/:id', async (req: AuthRequest, res: Response) =>
         ...(githubUrl   !== undefined && { githubUrl:   githubUrl   || null }),
         ...(demoUrl     !== undefined && { demoUrl:     demoUrl     || null }),
         ...(coinsPerDay !== undefined && { coinsPerDay: Number(coinsPerDay) }),
+        ...(isFree      !== undefined && { isFree: Boolean(isFree) }),
         ...(envTemplate !== undefined && { envTemplate: typeof envTemplate === 'string' ? JSON.parse(envTemplate) : envTemplate }),
       },
     });

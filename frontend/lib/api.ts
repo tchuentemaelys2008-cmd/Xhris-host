@@ -206,7 +206,7 @@ export const adminApi = {
     apiClient.get(`/admin/marketplace-bots/${id}`),
   reviewMarketplaceBot: (id: string, status: 'PUBLISHED' | 'REJECTED', reason?: string) =>
     apiClient.post(`/admin/marketplace-bots/${id}/review`, { status, reason }),
-  updateMarketplaceBot: (id: string, data: { sessionUrl?: string; githubUrl?: string; demoUrl?: string; coinsPerDay?: number }) =>
+  updateMarketplaceBot: (id: string, data: { sessionUrl?: string; githubUrl?: string; demoUrl?: string; coinsPerDay?: number; isFree?: boolean; envTemplate?: any }) =>
     apiClient.patch(`/admin/marketplace-bots/${id}`, data),
 };
 

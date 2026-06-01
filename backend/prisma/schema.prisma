@@ -194,6 +194,7 @@ model MarketplaceBot {
   developerId     String
   status          MarketplaceBotStatus @default(PENDING)
   coinsPerDay     Int                 @default(10)
+  isFree          Boolean             @default(false)
   setupFile       String?
   githubUrl       String?
   demoUrl         String?

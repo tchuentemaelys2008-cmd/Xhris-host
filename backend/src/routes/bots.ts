@@ -109,9 +109,12 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
     const botName = name || marketplaceBot?.name;
     if (!botName) return sendError(res, 'Nom du bot requis', 400);
 
-    const deployCost = marketplaceBot?.coinsPerDay || 10;
+    // Si le bot est marqué gratuit par l'admin, le déploiement ne coûte rien
+    const deployCost = marketplaceBot?.isFree ? 0 : (marketplaceBot?.coinsPerDay || 10);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { coins: true } });
-    if (!user || user.coins < deployCost) return sendError(res, `Coins insuffisants (${deployCost} requis)`, 400);
+    if (deployCost > 0 && (!user || user.coins < deployCost)) {
+      return sendError(res, `Coins insuffisants (${deployCost} requis)`, 400);
+    }
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const deployedToday = await prisma.transaction.count({
@@ -189,10 +192,12 @@ router.post('/deploy', async (req: AuthRequest, res: Response) => {
       data: { envVars: mergedEnvVars },
     }).catch(() => {});
 
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: deployCost } } }),
-      prisma.transaction.create({ data: { userId: req.user!.id, type: 'DEPLOY_BOT', description: `Deploiement de ${botName}`, amount: -deployCost } }),
-    ]);
+    if (deployCost > 0) {
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: req.user!.id }, data: { coins: { decrement: deployCost } } }),
+        prisma.transaction.create({ data: { userId: req.user!.id, type: 'DEPLOY_BOT', description: `Deploiement de ${botName}`, amount: -deployCost } }),
+      ]);
+    }
 
     try {
       const botPlatform = platform?.toUpperCase() || marketplaceBot?.platform || 'WHATSAPP';

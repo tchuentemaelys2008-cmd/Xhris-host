@@ -33,7 +33,7 @@ export default function AdminMarketplacePage() {
   const [rejectReason, setReason] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [editMode, setEditMode]   = useState(false);
-  const [editData, setEditData]   = useState<{ sessionUrl: string; githubUrl: string; demoUrl: string; coinsPerDay: string; envTemplate: string }>({ sessionUrl: '', githubUrl: '', demoUrl: '', coinsPerDay: '', envTemplate: '{}' });
+  const [editData, setEditData]   = useState<{ sessionUrl: string; githubUrl: string; demoUrl: string; coinsPerDay: string; isFree: boolean; envTemplate: string }>({ sessionUrl: '', githubUrl: '', demoUrl: '', coinsPerDay: '', isFree: false, envTemplate: '{}' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-marketplace-bots', search, statusFilter, page],
@@ -73,6 +73,7 @@ export default function AdminMarketplacePage() {
       githubUrl:   bot.githubUrl   || '',
       demoUrl:     bot.demoUrl     || '',
       coinsPerDay: String(bot.coinsPerDay || 10),
+      isFree: Boolean(bot.isFree),
       envTemplate: JSON.stringify(bot.envTemplate || {}, null, 2),
     });
     setEditMode(true);
@@ -88,13 +89,14 @@ export default function AdminMarketplacePage() {
         githubUrl:   editData.githubUrl   || null,
         demoUrl:     editData.demoUrl     || null,
         coinsPerDay: Number(editData.coinsPerDay) || 10,
+        isFree: editData.isFree,
         envTemplate: parsedEnv,
       });
     },
     onSuccess: () => {
       toast.success('Bot mis à jour');
       qc.invalidateQueries({ queryKey: ['admin-marketplace-bots'] });
-      setSelected((prev: any) => ({ ...prev, ...editData, coinsPerDay: Number(editData.coinsPerDay) }));
+      setSelected((prev: any) => ({ ...prev, ...editData, coinsPerDay: Number(editData.coinsPerDay), isFree: editData.isFree }));
       setEditMode(false);
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'Erreur'),
@@ -342,11 +344,30 @@ export default function AdminMarketplacePage() {
                       <label className="text-xs text-gray-400 mb-1 block">Coins / jour</label>
                       <input
                         type="number"
-                        className="input-field w-28 text-sm"
+                        className="input-field w-28 text-sm disabled:opacity-40"
                         min={1}
+                        disabled={editData.isFree}
                         value={editData.coinsPerDay}
                         onChange={e => setEditData(d => ({ ...d, coinsPerDay: e.target.value }))}
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-gray-400 mb-1 block">Tarification</label>
+                      <button
+                        type="button"
+                        onClick={() => setEditData(d => ({ ...d, isFree: !d.isFree }))}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${
+                          editData.isFree
+                            ? 'bg-green-500/20 text-green-400 border border-green-500/40'
+                            : 'bg-white/5 text-gray-400 border border-white/10'
+                        }`}
+                      >
+                        <span className={`w-9 h-5 rounded-full relative transition ${editData.isFree ? 'bg-green-500' : 'bg-gray-600'}`}>
+                          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${editData.isFree ? 'left-[18px]' : 'left-0.5'}`} />
+                        </span>
+                        {editData.isFree ? '🆓 Bot gratuit (déploiement sans coins)' : 'Bot payant'}
+                      </button>
                     </div>
 
                     <div>
