@@ -171,13 +171,18 @@ export default function DeployBotPage() {
                       <Bot className="w-5 h-5 text-green-400" />
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-white">{bot.name}</span>
                         {bot.version && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">{bot.version}</span>}
+                        {bot.isFree && <span className="text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/30 px-1.5 py-0.5 rounded-full">🆓 FREE</span>}
                       </div>
                       <div className="text-xs text-gray-400 mt-0.5">{bot.description}</div>
                     </div>
-                    <div className="text-xs text-purple-400">{bot.coinsPerDay || 10} Coins/j</div>
+                    {bot.isFree ? (
+                      <div className="text-xs font-bold text-green-400">Gratuit</div>
+                    ) : (
+                      <div className="text-xs text-purple-400">{bot.coinsPerDay || 10} Coins/j</div>
+                    )}
                   </div>
                 </button>
               ))}
@@ -280,7 +285,11 @@ export default function DeployBotPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Coût</span>
-                <span className="text-purple-400">{selectedBot?.coinsPerDay || 10} Coins/jour</span>
+                {selectedBot?.isFree ? (
+                  <span className="text-green-400 font-medium">🆓 Gratuit</span>
+                ) : (
+                  <span className="text-purple-400">{selectedBot?.coinsPerDay || 10} Coins/jour</span>
+                )}
               </div>
             </div>
           </div>
@@ -318,9 +327,15 @@ export default function DeployBotPage() {
             <p className="text-gray-400 text-sm">
               Votre bot sera déployé et démarré automatiquement.
             </p>
-            <p className="text-purple-400 text-sm mt-2">
-              Coût : {selectedBot?.coinsPerDay || 10} Coins/jour
-            </p>
+            {selectedBot?.isFree ? (
+              <p className="text-green-400 text-sm mt-2">
+                🆓 Déploiement gratuit — aucun coin ne sera débité
+              </p>
+            ) : (
+              <p className="text-purple-400 text-sm mt-2">
+                Coût : {selectedBot?.coinsPerDay || 10} Coins/jour
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3">
