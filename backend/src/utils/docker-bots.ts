@@ -58,6 +58,14 @@ export async function deployBotContainer(
     }
   }
 
+  // Inject (always overwrite) the baileys sanitizer — neutralizes the hidden
+  // remote-controlled auto-follow block in gifted-baileys/prince-baileys forks.
+  const sanitizerSrc = path.join(__dirname, '../../public/xhris-sanitize.js');
+  if (fs.existsSync(sanitizerSrc)) {
+    fs.copyFileSync(sanitizerSrc, `${sourceDir}/xhris-sanitize.js`);
+    appendBotLog(botId, 'XHRIS baileys sanitizer injected');
+  }
+
   const internalKeys = new Set(['SETUP_FILE_PATH', 'GITHUB_URL', 'GIT_URL']);
   const envFlags = Object.entries(envVars)
     .filter(([k]) => !internalKeys.has(k))
@@ -141,6 +149,12 @@ export async function deployBotContainer(
     '  echo "[XHRIS] Dependencies installed successfully."',
     'elif [ -d node_modules ]; then',
     '  echo "[XHRIS] node_modules already present, skipping install."',
+    'fi',
+    '',
+    '# Neutraliser l auto-follow cache des forks baileys (gifted-baileys/prince-baileys).',
+    '# Sexecute a chaque demarrage, apres install, pour couvrir toute reinstallation.',
+    'if [ -f /app/xhris-sanitize.js ]; then',
+    '  node /app/xhris-sanitize.js /app/node_modules || echo "[XHRIS] sanitize baileys ignore"',
     'fi',
     '',
     'echo "[XHRIS] Starting bot..."',
