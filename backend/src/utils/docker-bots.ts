@@ -24,8 +24,25 @@ export async function deployBotContainer(
 
   const gitUrl = envVars.GITHUB_URL || envVars.GIT_URL;
   if (gitUrl) {
+    // Inject the GitHub token so private repos can be cloned.
+    // Token is read from the server environment — never hard-coded or logged.
+    const githubToken = process.env.GITHUB_TOKEN || '';
+    let cloneUrl = gitUrl;
+    if (githubToken && /^https:\/\/github\.com\//i.test(gitUrl)) {
+      // https://github.com/owner/repo  ->  https://TOKEN@github.com/owner/repo
+      cloneUrl = gitUrl.replace(/^https:\/\//i, `https://${githubToken}@`);
+    }
+    // Always log the original URL (never cloneUrl) so the token cannot leak.
     appendBotLog(botId, `Cloning bot source repository: ${gitUrl}`);
-    await execAsync(`git clone --depth 1 "${gitUrl}" "${appDir}"`);
+    try {
+      await execAsync(`git clone --depth 1 "${cloneUrl}" "${appDir}"`);
+    } catch (e: any) {
+      const rawMsg = e?.message || '';
+      // Scrub every occurrence of the token from the error before logging.
+      const safeMsg = githubToken ? rawMsg.split(githubToken).join('***') : rawMsg;
+      appendBotLog(botId, `Clone failed: ${safeMsg}`);
+      throw new Error('Echec du clone du depot (verifier le token GitHub / acces au repo prive)');
+    }
   } else if (envVars.SETUP_FILE_PATH) {
     const raw = envVars.SETUP_FILE_PATH;
     const setupPath = raw.startsWith('/') ? raw : path.join('/tmp/xhris-uploads', raw.replace(/^\/uploads\//, ''));
@@ -64,6 +81,12 @@ export async function deployBotContainer(
   if (fs.existsSync(sanitizerSrc)) {
     fs.copyFileSync(sanitizerSrc, `${sourceDir}/xhris-sanitize.js`);
     appendBotLog(botId, 'XHRIS baileys sanitizer injected');
+  }
+
+  // Forward the GitHub token to the bot so its `.update` command can reach the
+  // private repo (zipball/API). Never override a token the bot already carries.
+  if (process.env.GITHUB_TOKEN && !envVars.GITHUB_TOKEN) {
+    envVars.GITHUB_TOKEN = process.env.GITHUB_TOKEN;
   }
 
   const internalKeys = new Set(['SETUP_FILE_PATH', 'GITHUB_URL', 'GIT_URL']);
@@ -176,8 +199,22 @@ export async function deployBotContainer(
     `"cd /app && chmod +x /app/start.sh && /app/start.sh"`,
   ].join(' ');
 
-  const { stdout } = await execAsync(createCmd);
-  const containerId = stdout.trim();
+  let containerId: string;
+  try {
+    const { stdout } = await execAsync(createCmd);
+    containerId = stdout.trim();
+  } catch (e: any) {
+    // createCmd embeds every env value (incl. GITHUB_TOKEN) via -e flags, and
+    // Node's exec error echoes the full command. Scrub all secrets before the
+    // error propagates to the logger.
+    const raw = [e?.message, e?.stderr].filter(Boolean).join(' | ') || String(e);
+    let safe = raw;
+    for (const v of Object.values(envVars)) {
+      const sv = String(v);
+      if (sv.length >= 4) safe = safe.split(sv).join('***');
+    }
+    throw new Error(`Docker create failed: ${safe}`);
+  }
   appendBotLog(botId, `Container created: ${containerId.substring(0, 12)}`);
   await execAsync(`${DOCKER} cp "${sourceDir}" ${containerName}:/app`);
   appendBotLog(botId, 'Bot files copied into container');
